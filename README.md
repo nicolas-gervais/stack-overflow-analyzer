@@ -64,11 +64,15 @@ Now install and run:
 
 ```bash
 uv sync --frozen
-uv run uvicorn stack_overflow_analyzer.main:app --reload
+uv run uvicorn stack_overflow_analyzer.main:app --host 127.0.0.1 --port 8000
 ```
 
 If you only need deterministic analytics, skip the key setup entirely. `docker compose` reads the
 same local `.env` file automatically.
+
+On WSL under `/mnt/c`, avoid Uvicorn's `--reload` option: its file watcher may encounter
+Windows-owned cache directories and fail with `Permission denied`. The command above runs without
+the watcher. If hot reload is needed, move the repository into the WSL Linux filesystem first.
 
 Open <http://localhost:8000/docs> or try:
 
