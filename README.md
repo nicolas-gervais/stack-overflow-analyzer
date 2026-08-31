@@ -8,6 +8,21 @@ fact; the LLM receives a closed set of evidence and may only synthesize it.
 
 Prerequisites: Python 3.12+ and [`uv`](https://docs.astral.sh/uv/).
 
+On WSL/Linux, install `uv` with Astral's official standalone installer (do not use the Snap command):
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source "$HOME/.local/bin/env"
+uv --version
+```
+
+If the `source` file is unavailable, restart the WSL shell and run `uv --version` again. Then return
+to the project directory:
+
+```bash
+cd /mnt/c/Users/nicol/stack_overflow_analyzer
+```
+
 Stack Overflow analytics require no credentials. An OpenAI API key is required only for the
 `/narrative` endpoint.
 
