@@ -29,7 +29,6 @@ class StackExchangeClient(StackExchangeGateway):
         *,
         base_url: str,
         site: str,
-        api_key: str | None,
         timeout_seconds: float,
         max_retries: int,
         client: httpx.AsyncClient | None = None,
@@ -39,7 +38,6 @@ class StackExchangeClient(StackExchangeGateway):
         self._client = client or httpx.AsyncClient(base_url=base_url, timeout=timeout_seconds)
         self._owns_client = client is None
         self._site = site
-        self._api_key = api_key
         self._max_retries = max_retries
         self._sleep = sleep
         self._jitter = jitter
@@ -120,8 +118,6 @@ class StackExchangeClient(StackExchangeGateway):
         if self._quota_remaining == 0:
             raise QuotaExhaustedError("Stack Exchange quota is exhausted")
         request_params = {"site": self._site, **params}
-        if self._api_key:
-            request_params["key"] = self._api_key
 
         for attempt in range(self._max_retries + 1):
             await self._respect_provider_backoff()

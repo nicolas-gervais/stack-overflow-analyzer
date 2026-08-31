@@ -10,7 +10,7 @@ Prerequisites: Python 3.12+ and [`uv`](https://docs.astral.sh/uv/).
 
 ```bash
 cp .env.example .env                 # PowerShell: Copy-Item .env.example .env
-# Add SOA_OPENAI_API_KEY to .env only if you want the narrative endpoint.
+# Add SOA_OPENAI_API_KEY only if you want the narrative endpoint.
 uv sync --frozen
 uv run uvicorn stack_overflow_analyzer.main:app --reload
 ```
@@ -29,10 +29,11 @@ curl -X POST "http://localhost:8000/v1/tags/tensorflow/contributors/USER_ID/narr
 curl "http://localhost:8000/v1/tags/tensorflow/top-answerers/all-time"
 ```
 
-The first period query synchronizes the requested date range into SQLite. Contributor detail also
+**Stack Overflow data is public and requires no key, token, account, or OAuth flow.** The first
+period query synchronizes the requested date range into SQLite. Contributor detail also
 synchronizes the immediately preceding equivalent-length period for comparison. Repeating a query
-uses its completed checkpoint without spending Stack Exchange quota. An optional Stack Apps key in
-`SOA_STACK_EXCHANGE_KEY` raises the upstream daily quota.
+uses its completed checkpoint without spending additional Stack Exchange quota. The public API's
+shared IP quota and returned `backoff` instructions are handled automatically.
 
 Docker is also supported:
 
@@ -78,8 +79,8 @@ only network/5xx failures with bounded exponential backoff and jitter, and rejec
 
 The narrative adapter uses the OpenAI Responses API `responses.parse` helper with a Pydantic
 Structured Output. It sends the deterministic analysis and predefined evidence objects. The
-application rejects any returned evidence ID outside that set. `SOA_OPENAI_API_KEY` and
-`SOA_STACK_EXCHANGE_KEY` are Pydantic `SecretStr` values and are never logged.
+application rejects any returned evidence ID outside that set. `SOA_OPENAI_API_KEY` is a Pydantic
+`SecretStr` and is never logged. It is needed only for the optional narrative endpoint.
 
 ## Development
 

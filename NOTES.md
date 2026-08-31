@@ -3,9 +3,10 @@
 ## Run locally
 
 Install Python 3.12+ and `uv`, copy `.env.example` to `.env`, optionally set
-`SOA_OPENAI_API_KEY` and `SOA_STACK_EXCHANGE_KEY`, then run `uv sync --frozen` and
+`SOA_OPENAI_API_KEY` for LLM narratives, then run `uv sync --frozen` and
 `uv run uvicorn stack_overflow_analyzer.main:app --reload`. The deterministic endpoints need no
-credentials. `docker compose up --build` is the one-command alternative.
+credentials, including no Stack Overflow key or login. `docker compose up --build` is the
+one-command alternative.
 
 ## Architecture and decisions
 

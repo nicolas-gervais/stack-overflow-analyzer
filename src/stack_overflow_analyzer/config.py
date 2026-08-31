@@ -19,7 +19,6 @@ class Settings(BaseSettings):
 
     stack_exchange_base_url: str = "https://api.stackexchange.com/2.3"
     stack_exchange_site: str = "stackoverflow"
-    stack_exchange_key: SecretStr | None = None
     stack_exchange_timeout_seconds: float = Field(default=15.0, gt=0)
     stack_exchange_max_retries: int = Field(default=3, ge=0, le=8)
 

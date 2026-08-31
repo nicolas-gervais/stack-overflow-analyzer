@@ -69,11 +69,6 @@ def create_app(
     gateway = stack_exchange or StackExchangeClient(
         base_url=config.stack_exchange_base_url,
         site=config.stack_exchange_site,
-        api_key=(
-            config.stack_exchange_key.get_secret_value()
-            if config.stack_exchange_key is not None
-            else None
-        ),
         timeout_seconds=config.stack_exchange_timeout_seconds,
         max_retries=config.stack_exchange_max_retries,
     )

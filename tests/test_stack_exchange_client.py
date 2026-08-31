@@ -18,7 +18,6 @@ def make_client(http_client, sleeps, retries=2):
     return StackExchangeClient(
         base_url="https://api.stackexchange.com/2.3",
         site="stackoverflow",
-        api_key=None,
         timeout_seconds=1,
         max_retries=retries,
         client=http_client,
