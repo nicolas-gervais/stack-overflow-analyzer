@@ -8,12 +8,52 @@ fact; the LLM receives a closed set of evidence and may only synthesize it.
 
 Prerequisites: Python 3.12+ and [`uv`](https://docs.astral.sh/uv/).
 
+Stack Overflow analytics require no credentials. An OpenAI API key is required only for the
+`/narrative` endpoint.
+
+### Configure the OpenAI key (optional)
+
+Create a key in the [OpenAI API dashboard](https://platform.openai.com/api-keys). Then create your
+private `.env` file—do **not** put the key in `.env.example`.
+
+PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+notepad .env
+```
+
+Set the first line of `.env` to your actual key:
+
+```dotenv
+SOA_OPENAI_API_KEY=your-key-here
+```
+
+The `.env` file is already excluded by `.gitignore`. For a temporary PowerShell session instead of
+a file, use:
+
+```powershell
+$env:SOA_OPENAI_API_KEY = "your-key-here"
+```
+
+macOS/Linux equivalents:
+
 ```bash
-cp .env.example .env                 # PowerShell: Copy-Item .env.example .env
-# Add SOA_OPENAI_API_KEY only if you want the narrative endpoint.
+cp .env.example .env
+# Edit .env and set SOA_OPENAI_API_KEY=your-key-here
+# Or, for this terminal session only:
+export SOA_OPENAI_API_KEY="your-key-here"
+```
+
+Now install and run:
+
+```bash
 uv sync --frozen
 uv run uvicorn stack_overflow_analyzer.main:app --reload
 ```
+
+If you only need deterministic analytics, skip the key setup entirely. `docker compose` reads the
+same local `.env` file automatically.
 
 Open <http://localhost:8000/docs> or try:
 
