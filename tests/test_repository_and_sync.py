@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -6,13 +6,13 @@ from stack_overflow_analyzer.adapters.database import SQLiteAnalyticsRepository
 from stack_overflow_analyzer.application.sync import SyncService
 from stack_overflow_analyzer.domain.exceptions import UpstreamResponseError
 from stack_overflow_analyzer.domain.models import DateRange, StackPage
-from tests.fakes import FakeStackExchange
+from tests.fakes import FakeRepository, FakeStackExchange
 
 
-def question(question_id=10):
+def question(question_id=10, creation_date=1735689600):
     return {
         "question_id": question_id,
-        "creation_date": 1735689600,
+        "creation_date": creation_date,
         "title": "How?",
         "tags": ["python", "pandas"],
         "link": f"https://stackoverflow.com/q/{question_id}",
@@ -102,3 +102,30 @@ async def test_malformed_entity_does_not_advance_checkpoint(repository):
     assert resumed is True
     assert checkpoint.next_page == 1
     assert checkpoint.completed is False
+
+
+@pytest.mark.asyncio
+async def test_anonymous_page_limit_rolls_forward_time_cursor():
+    period = DateRange(start_date=date(2020, 1, 1), end_date=date(2025, 1, 7))
+    repository = FakeRepository()
+    checkpoint, _ = await repository.get_or_create_checkpoint("tensorflow", period)
+    checkpoint.next_page = 25
+    rollover_timestamp = 1609459200
+    gateway = FakeStackExchange()
+    gateway.question_pages = {
+        25: StackPage(
+            items=[question(creation_date=rollover_timestamp)],
+            has_more=True,
+            quota_remaining=100,
+        ),
+        1: StackPage(items=[], has_more=False, quota_remaining=99),
+    }
+
+    result = await SyncService(gateway, repository).sync("tensorflow", period)
+
+    assert result.status.value == "completed"
+    assert gateway.requested_pages == [25, 1]
+    assert gateway.requested_from_dates == [
+        period.start_at,
+        datetime.fromtimestamp(rollover_timestamp, tz=UTC),
+    ]

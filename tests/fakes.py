@@ -23,10 +23,12 @@ class FakeStackExchange(StackExchangeGateway):
         }
         self.answers: list[dict[str, object]] = []
         self.requested_pages: list[int] = []
+        self.requested_from_dates: list[object] = []
         self.closed = False
 
     async def fetch_questions(self, tag, from_date, to_date, page):
         self.requested_pages.append(page)
+        self.requested_from_dates.append(from_date)
         result = self.question_pages[page]
         if isinstance(result, Exception):
             raise result
@@ -73,7 +75,9 @@ class FakeRepository(AnalyticsRepository):
         if key in self.checkpoints:
             return self.checkpoints[key], True
         self.checkpoint_count += 1
-        checkpoint = Checkpoint(f"sync-{self.checkpoint_count}", 1, False)
+        checkpoint = Checkpoint(
+            f"sync-{self.checkpoint_count}", 1, False, cursor_from=period.start_at
+        )
         self.checkpoints[key] = checkpoint
         return checkpoint, False
 
@@ -84,17 +88,21 @@ class FakeRepository(AnalyticsRepository):
         questions,
         answers,
         *,
-        has_more,
+        cursor_from,
+        next_cursor_from,
+        next_page,
+        completed,
         quota_remaining,
     ):
         for checkpoint in self.checkpoints.values():
             if checkpoint.sync_id == sync_id:
-                checkpoint.next_page = page + 1
+                checkpoint.cursor_from = next_cursor_from
+                checkpoint.next_page = next_page
                 checkpoint.pages_completed += 1
                 checkpoint.questions_upserted += len(questions)
                 checkpoint.answers_upserted += len(answers)
                 checkpoint.quota_remaining = quota_remaining
-                checkpoint.completed = not has_more
+                checkpoint.completed = completed
                 return
 
     async def mark_sync_failed(self, sync_id, error_type):

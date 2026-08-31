@@ -1,5 +1,6 @@
 import asyncio
 from collections import defaultdict
+from datetime import UTC
 
 import structlog
 from pydantic import ValidationError
@@ -36,6 +37,9 @@ class SyncService:
             return self._result(checkpoint, tag, period, resumed=True)
 
         page_number = checkpoint.next_page
+        cursor_from = checkpoint.cursor_from or period.start_at
+        if cursor_from.tzinfo is None:
+            cursor_from = cursor_from.replace(tzinfo=UTC)
         pages_completed = checkpoint.pages_completed
         questions_upserted = checkpoint.questions_upserted
         answers_upserted = checkpoint.answers_upserted
@@ -43,7 +47,7 @@ class SyncService:
         try:
             while True:
                 page = await self._gateway.fetch_questions(
-                    tag, period.start_at, period.end_exclusive, page_number
+                    tag, cursor_from, period.end_exclusive, page_number
                 )
                 questions = [self._parse_question(item) for item in page.items]
                 answers_payload, answer_quota = await self._gateway.fetch_answers(
@@ -53,12 +57,25 @@ class SyncService:
                 )
                 answers = [self._parse_answer(item) for item in answers_payload]
                 quota_remaining = answer_quota if answer_quota is not None else page.quota_remaining
+                completed = not page.has_more
+                next_cursor_from = cursor_from
+                next_page = page_number + 1
+                if page.has_more and page_number == 25:
+                    if not questions:
+                        raise UpstreamResponseError(
+                            "Stack Exchange returned an empty page with has_more=true"
+                        )
+                    next_cursor_from = max(question.creation_date for question in questions)
+                    next_page = 1
                 await self._repository.save_sync_page(
                     checkpoint.sync_id,
                     page_number,
                     questions,
                     answers,
-                    has_more=page.has_more,
+                    cursor_from=cursor_from,
+                    next_cursor_from=next_cursor_from,
+                    next_page=next_page,
+                    completed=completed,
                     quota_remaining=quota_remaining,
                 )
                 pages_completed += 1
@@ -71,11 +88,13 @@ class SyncService:
                     sync_id=checkpoint.sync_id,
                     tag=tag,
                     page=page_number,
+                    cursor_from=cursor_from.isoformat(),
+                    next_cursor_from=next_cursor_from.isoformat(),
                     questions=len(questions),
                     answers=len(answers),
                     quota_remaining=quota_remaining,
                 )
-                if not page.has_more:
+                if completed:
                     return SyncResult(
                         sync_id=checkpoint.sync_id,
                         tag=tag,
@@ -87,7 +106,8 @@ class SyncService:
                         resumed=resumed,
                         quota_remaining=quota_remaining,
                     )
-                page_number += 1
+                cursor_from = next_cursor_from
+                page_number = next_page
         except Exception as exc:
             await self._repository.mark_sync_failed(checkpoint.sync_id, type(exc).__name__)
             logger.error(

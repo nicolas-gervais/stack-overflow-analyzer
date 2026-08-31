@@ -82,6 +82,7 @@ class SyncRunRecord(Base):
     start_date: Mapped[date] = mapped_column(Date)
     end_date: Mapped[date] = mapped_column(Date)
     status: Mapped[str] = mapped_column(String(20))
+    cursor_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     next_page: Mapped[int] = mapped_column(Integer, default=1)
     pages_completed: Mapped[int] = mapped_column(Integer, default=0)
     questions_upserted: Mapped[int] = mapped_column(Integer, default=0)
@@ -99,6 +100,13 @@ class SQLiteAnalyticsRepository(AnalyticsRepository):
     async def initialize(self) -> None:
         async with self._engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
+            columns = {
+                row[1] for row in (await connection.exec_driver_sql("PRAGMA table_info(sync_runs)"))
+            }
+            if "cursor_from" not in columns:
+                await connection.exec_driver_sql(
+                    "ALTER TABLE sync_runs ADD COLUMN cursor_from DATETIME"
+                )
 
     async def get_or_create_checkpoint(
         self, tag: str, period: DateRange
@@ -119,6 +127,7 @@ class SQLiteAnalyticsRepository(AnalyticsRepository):
                     start_date=period.start_date,
                     end_date=period.end_date,
                     status=SyncStatus.RUNNING.value,
+                    cursor_from=period.start_at,
                     next_page=1,
                     pages_completed=0,
                     questions_upserted=0,
@@ -127,6 +136,10 @@ class SQLiteAnalyticsRepository(AnalyticsRepository):
                 )
                 session.add(record)
             elif record.status != SyncStatus.COMPLETED.value:
+                if record.cursor_from is None:
+                    record.cursor_from = period.start_at
+                if record.next_page > 25:
+                    record.next_page = 1
                 record.status = SyncStatus.RUNNING.value
                 record.error_type = None
                 record.updated_at = datetime.now(UTC)
@@ -139,7 +152,10 @@ class SQLiteAnalyticsRepository(AnalyticsRepository):
         questions: list[Question],
         answers: list[Answer],
         *,
-        has_more: bool,
+        cursor_from: datetime,
+        next_cursor_from: datetime,
+        next_page: int,
+        completed: bool,
         quota_remaining: int | None,
     ) -> None:
         async with self._sessions.begin() as session:
@@ -229,12 +245,13 @@ class SQLiteAnalyticsRepository(AnalyticsRepository):
                     )
                 )
 
-            run.next_page = page + 1
+            run.cursor_from = next_cursor_from
+            run.next_page = next_page
             run.pages_completed += 1
             run.questions_upserted += len(questions)
             run.answers_upserted += len(answers)
             run.quota_remaining = quota_remaining
-            run.status = SyncStatus.RUNNING.value if has_more else SyncStatus.COMPLETED.value
+            run.status = SyncStatus.COMPLETED.value if completed else SyncStatus.RUNNING.value
             run.updated_at = datetime.now(UTC)
 
     async def mark_sync_failed(self, sync_id: str, error_type: str) -> None:
@@ -322,6 +339,7 @@ class SQLiteAnalyticsRepository(AnalyticsRepository):
             sync_id=record.sync_id,
             next_page=record.next_page,
             completed=record.status == SyncStatus.COMPLETED.value,
+            cursor_from=record.cursor_from,
             pages_completed=record.pages_completed,
             questions_upserted=record.questions_upserted,
             answers_upserted=record.answers_upserted,

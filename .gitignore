@@ -1,6 +1,6 @@
 .env
-.venv/
-.uv-cache/
+.venv*/
+.uv-cache*/
 .pre-commit-cache/
 .pytest_cache/
 .test-tmp/

@@ -130,7 +130,9 @@ stable Stack Exchange IDs and advances the checkpoint only after the entire ques
 of its answer pages have succeeded. A crash leaves the page unadvanced, so retrying is safe. The
 client batches question IDs, follows pagination, honors provider `backoff`, records quota, retries
 only network/5xx failures with bounded exponential backoff and jitter, and rejects deterministic
-4xx and exhausted quota without retrying.
+4xx and exhausted quota without retrying. Anonymous access is capped at page 25, so long queries
+checkpoint the last creation timestamp and continue from page 1; inclusive overlap is harmless
+because stable-ID upserts remove duplicates.
 
 The narrative adapter uses the OpenAI Responses API `responses.parse` helper with a Pydantic
 Structured Output. It sends the deterministic analysis and predefined evidence objects. The

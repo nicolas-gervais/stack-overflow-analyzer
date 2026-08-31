@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from datetime import datetime
 
 from stack_overflow_analyzer.domain.models import Answer, DateRange, Question
 
@@ -29,6 +30,7 @@ class Checkpoint:
         next_page: int,
         completed: bool,
         *,
+        cursor_from: datetime | None = None,
         pages_completed: int = 0,
         questions_upserted: int = 0,
         answers_upserted: int = 0,
@@ -37,6 +39,7 @@ class Checkpoint:
         self.sync_id = sync_id
         self.next_page = next_page
         self.completed = completed
+        self.cursor_from = cursor_from
         self.pages_completed = pages_completed
         self.questions_upserted = questions_upserted
         self.answers_upserted = answers_upserted
@@ -60,7 +63,10 @@ class AnalyticsRepository(ABC):
         questions: list[Question],
         answers: list[Answer],
         *,
-        has_more: bool,
+        cursor_from: datetime,
+        next_cursor_from: datetime,
+        next_page: int,
+        completed: bool,
         quota_remaining: int | None,
     ) -> None: ...
 
