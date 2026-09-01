@@ -50,6 +50,22 @@ def test_invalid_tag_and_date_range_return_422():
     assert bad_dates.status_code == 422
 
 
+def test_period_longer_than_one_month_is_rejected_before_sync():
+    with app_client() as client:
+        response = client.get(
+            "/v1/tags/tensorflow/contributors",
+            params={"from_date": "2025-01-01", "to_date": "2025-02-01"},
+        )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": (
+            "date range cannot exceed 31 inclusive days; "
+            "split longer analyses into monthly requests"
+        )
+    }
+
+
 def test_all_time_endpoint_uses_official_gateway_feature():
     with app_client() as client:
         response = client.get("/v1/tags/python/top-answerers/all-time")

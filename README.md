@@ -113,6 +113,10 @@ creation interval. Crawling all site-wide answers would be quota-prohibitive. Th
 therefore complete and reproducible from bounded API calls; it does **not** claim to count answers
 posted during the range on older questions. No weighted or LLM-derived contribution score exists.
 
+To prevent one request from exhausting the shared public quota, every API date range is limited to
+31 inclusive days by default. Longer analyses must be split into monthly requests. The guardrail is
+configurable with `SOA_MAX_PERIOD_DAYS`, but increasing it is not recommended for anonymous access.
+
 Acceptance rate is accepted answers / qualifying answers. Average score is total answer score /
 qualifying answers. “Top 20” in contributor analysis refers to this custom period leaderboard; the
 separate all-time endpoint exposes Stack Exchange's official tag Top-20. Peer medians use the custom
@@ -160,14 +164,14 @@ retry, pagination, quota, and error type without request bodies or secrets.
 
 ## API semantics
 
-- `GET /v1/tags/{tag}/contributors` — period leaderboard; `limit` is 1–100.
+- `GET /v1/tags/{tag}/contributors` — period leaderboard; `limit` is 1–100 and the period is at most 31 inclusive days.
 - `GET /v1/tags/{tag}/contributors/{user_id}` — facts, peer/prior comparison, topics, evidence.
 - `POST /v1/tags/{tag}/contributors/{user_id}/narrative` — paid external computation, hence POST.
 - `POST /v1/sync` — explicit idempotent warm-up/resume operation.
 - `GET /v1/tags/{tag}/top-answerers/all-time` — official Stack Exchange leaderboard.
 - `GET /health` — liveness and process health.
 
-Expected failures use 404 (no qualifying contributor), 422 (input), 429 (quota), or 502 (upstream /
+Expected failures use 404 (no qualifying contributor), 422 (input or a period over 31 days), 429 (quota), or 502 (upstream /
 narrative failure). A caller-supplied or generated `X-Request-ID` is returned on every response.
 
 See [NOTES.md](NOTES.md) for submission trade-offs and next steps.

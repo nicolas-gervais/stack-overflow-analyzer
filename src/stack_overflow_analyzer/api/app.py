@@ -160,7 +160,7 @@ def create_app(
     )
     async def sync_period(payload: SyncRequest) -> SyncResult:
         tag = validate_tag(payload.tag)
-        period = validated_period(payload.start_date, payload.end_date)
+        period = validated_period(payload.start_date, payload.end_date, config.max_period_days)
         return await sync_service.sync(tag, period)
 
     @app.get(
@@ -175,7 +175,9 @@ def create_app(
         limit: Annotated[int, Query(ge=1, le=100)] = 20,
     ) -> Leaderboard:
         return await analytics_service.leaderboard(
-            validate_tag(tag), validated_period(from_date, to_date), limit=limit
+            validate_tag(tag),
+            validated_period(from_date, to_date, config.max_period_days),
+            limit=limit,
         )
 
     @app.get(
@@ -190,7 +192,9 @@ def create_app(
         to_date: Annotated[date, Query()],
     ) -> ContributorAnalysis:
         return await analytics_service.analyze(
-            validate_tag(tag), validated_period(from_date, to_date), user_id
+            validate_tag(tag),
+            validated_period(from_date, to_date, config.max_period_days),
+            user_id,
         )
 
     @app.post(
@@ -205,7 +209,7 @@ def create_app(
     ) -> ContributorNarrative:
         return await narrative_service.create(
             validate_tag(tag),
-            validated_period(payload.start_date, payload.end_date),
+            validated_period(payload.start_date, payload.end_date, config.max_period_days),
             user_id,
         )
 
@@ -232,13 +236,23 @@ def validate_tag(tag: str) -> str:
     return normalized
 
 
-def validated_period(start_date: date, end_date: date) -> DateRange:
+def validated_period(start_date: date, end_date: date, max_days: int = 31) -> DateRange:
     try:
-        return DateRange(start_date=start_date, end_date=end_date)
+        period = DateRange(start_date=start_date, end_date=end_date)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from exc
+    inclusive_days = (end_date - start_date).days + 1
+    if inclusive_days > max_days:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"date range cannot exceed {max_days} inclusive days; "
+                "split longer analyses into monthly requests"
+            ),
+        )
+    return period
 
 
 app = create_app()

@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     log_level: str = "INFO"
     database_url: str = "sqlite+aiosqlite:///./stack_overflow.db"
+    max_period_days: int = Field(default=31, ge=1, le=366)
 
     stack_exchange_base_url: str = "https://api.stackexchange.com/2.3"
     stack_exchange_site: str = "stackoverflow"

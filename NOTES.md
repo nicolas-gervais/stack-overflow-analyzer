@@ -17,6 +17,9 @@ checkpoints. Pure analytics owns ranking, medians, comparisons, date arithmetic,
 and evidence creation. The OpenAI adapter uses Responses API Structured Outputs through Pydantic,
 while an application-level allowlist prevents fabricated evidence references.
 
+API requests are capped at 31 inclusive days so one accidental multi-year query cannot consume the
+entire shared anonymous quota. Callers split longer reporting windows into monthly requests.
+
 The period-cohort metric is intentionally narrower than “all answers to this tag posted in the
 period.” Stack Exchange offers no efficient arbitrary-range endpoint for that broader query, so the
 service reports a complete bounded cohort rather than silently returning incomplete data or burning
