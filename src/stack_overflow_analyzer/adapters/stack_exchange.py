@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 import httpx
 import structlog
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from stack_overflow_analyzer.domain.exceptions import (
     QuotaExhaustedError,
@@ -23,6 +23,18 @@ from stack_overflow_analyzer.domain.models import (
 from stack_overflow_analyzer.ports.stack_exchange import StackExchangeGateway
 
 logger = structlog.get_logger(__name__)
+
+
+class _TagScoreUser(BaseModel):
+    user_id: int
+    display_name: str
+    link: str | None = None
+
+
+class _TagScore(BaseModel):
+    user: _TagScoreUser
+    score: int
+    post_count: int
 
 
 class StackExchangeClient(StackExchangeGateway):
@@ -54,7 +66,7 @@ class StackExchangeClient(StackExchangeGateway):
             raise ValueError("at least one user ID is required")
         if len(unique_ids) > 100:
             raise ValueError("Stack Exchange accepts at most 100 user IDs per batch")
-        payload = await self._request(
+        page_data = await self._request(
             f"/users/{';'.join(str(item) for item in unique_ids)}/answers",
             {
                 "fromdate": int(from_date.timestamp()),
@@ -65,7 +77,7 @@ class StackExchangeClient(StackExchangeGateway):
                 "pagesize": 100,
             },
         )
-        return StackPage.model_validate(payload)
+        return page_data
 
     async def fetch_questions_by_ids(
         self, question_ids: list[int]
@@ -75,49 +87,55 @@ class StackExchangeClient(StackExchangeGateway):
             return [], self._quota_remaining
         if len(unique_ids) > 100:
             raise ValueError("Stack Exchange accepts at most 100 question IDs per batch")
-        payload = await self._request(
+        page_data = await self._request(
             f"/questions/{';'.join(str(item) for item in unique_ids)}",
             {"pagesize": 100},
         )
-        page = StackPage.model_validate(payload)
-        return page.items, page.quota_remaining
+        return page_data.items, page_data.quota_remaining
 
     async def fetch_all_time_top_answerers(self, tag: str) -> AllTimeLeaderboard:
         encoded_tag = quote(tag, safe="")
-        payload = await self._request(
+        page_data = await self._request(
             f"/tags/{encoded_tag}/top-answerers/all_time", {"pagesize": 20}
         )
-        page = StackPage.model_validate(payload)
         contributors: list[AllTimeTopAnswerer] = []
-        for rank, item in enumerate(page.items[:20], start=1):
-            user = item.get("user")
-            if not isinstance(user, dict) or "user_id" not in user:
-                continue
+        seen_user_ids: set[int] = set()
+        for rank, item in enumerate(page_data.items[:20], start=1):
+            try:
+                tag_score = _TagScore.model_validate(item)
+            except ValidationError as exc:
+                raise UpstreamResponseError(
+                    "malformed tag score in Stack Exchange response"
+                ) from exc
+            if tag_score.user.user_id in seen_user_ids:
+                raise UpstreamResponseError("duplicate tag score user in Stack Exchange response")
+            seen_user_ids.add(tag_score.user.user_id)
             contributors.append(
                 AllTimeTopAnswerer(
                     rank=rank,
-                    user_id=int(user["user_id"]),
-                    display_name=str(user.get("display_name", "unknown")),
-                    profile_url=str(user["link"]) if user.get("link") else None,
-                    score=int(item.get("score", 0)),
-                    post_count=int(item.get("post_count", 0)),
+                    user_id=tag_score.user.user_id,
+                    display_name=tag_score.user.display_name,
+                    profile_url=tag_score.user.link,
+                    score=tag_score.score,
+                    post_count=tag_score.post_count,
                 )
             )
         return AllTimeLeaderboard(
-            tag=tag, contributors=contributors, quota_remaining=page.quota_remaining
+            tag=tag,
+            contributors=contributors,
+            quota_remaining=page_data.quota_remaining,
         )
 
     async def fetch_user(self, user_id: int) -> Owner | None:
-        payload = await self._request(f"/users/{user_id}", {})
-        page = StackPage.model_validate(payload)
-        if not page.items:
+        page_data = await self._request(f"/users/{user_id}", {})
+        if not page_data.items:
             return None
         try:
-            return Owner.model_validate(page.items[0])
+            return Owner.model_validate(page_data.items[0])
         except ValidationError as exc:
             raise UpstreamResponseError("malformed user in Stack Exchange response") from exc
 
-    async def _request(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
+    async def _request(self, path: str, params: dict[str, Any]) -> StackPage:
         if self._quota_remaining == 0:
             raise QuotaExhaustedError("Stack Exchange quota is exhausted")
         request_params = {"site": self._site, **params}
@@ -148,7 +166,7 @@ class StackExchangeClient(StackExchangeGateway):
                     error = {}
                 if not isinstance(error, dict):
                     error = {}
-                if error.get("error_name") == "throttle_violation":
+                if response.status_code == 429 or error.get("error_name") == "throttle_violation":
                     raise QuotaExhaustedError(
                         "Stack Exchange rejected the request for quota reasons"
                     )
@@ -163,13 +181,17 @@ class StackExchangeClient(StackExchangeGateway):
                 raise UpstreamResponseError("Stack Exchange returned malformed JSON") from exc
             if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
                 raise UpstreamResponseError("Stack Exchange response has an invalid shape")
+            try:
+                page_data = StackPage.model_validate(payload)
+            except ValidationError as exc:
+                raise UpstreamResponseError("Stack Exchange response has an invalid shape") from exc
 
-            quota = payload.get("quota_remaining")
-            self._quota_remaining = int(quota) if quota is not None else self._quota_remaining
-            provider_backoff = payload.get("backoff")
+            if page_data.quota_remaining is not None:
+                self._quota_remaining = page_data.quota_remaining
+            provider_backoff = page_data.backoff
             if provider_backoff is not None:
                 self._backoff_until = max(
-                    self._backoff_until, monotonic() + max(0, int(provider_backoff))
+                    self._backoff_until, monotonic() + max(0, provider_backoff)
                 )
             logger.info(
                 "provider_request_completed",
@@ -179,10 +201,10 @@ class StackExchangeClient(StackExchangeGateway):
                 duration_ms=duration_ms,
                 retry_attempt=attempt,
                 quota_remaining=self._quota_remaining,
-                quota_max=payload.get("quota_max"),
+                quota_max=page_data.quota_max,
                 provider_backoff=provider_backoff,
             )
-            return payload
+            return page_data
         raise AssertionError("retry loop terminated unexpectedly")
 
     async def _respect_provider_backoff(self) -> None:

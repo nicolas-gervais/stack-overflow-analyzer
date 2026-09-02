@@ -81,6 +81,22 @@ async def test_does_not_retry_deterministic_4xx():
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_http_429_is_translated_to_quota_error_without_retry():
+    route = respx.get("https://api.stackexchange.com/2.3/users/1/answers").mock(
+        return_value=httpx.Response(429, json={"error_name": "rate_limit"})
+    )
+    sleeps = []
+    async with httpx.AsyncClient(base_url="https://api.stackexchange.com/2.3") as http_client:
+        client = make_client(http_client, sleeps)
+        with pytest.raises(QuotaExhaustedError, match="quota reasons"):
+            await client.fetch_users_answers([1], START, END, 1)
+
+    assert route.call_count == 1
+    assert sleeps == []
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_benchmark_user_answers_and_parent_question_batch():
     answer_route = respx.get("https://api.stackexchange.com/2.3/users/42;43/answers").mock(
         return_value=httpx.Response(
@@ -163,6 +179,53 @@ async def test_malformed_response_is_rejected():
         client = make_client(http_client, [])
         with pytest.raises(UpstreamResponseError, match="invalid shape"):
             await client.fetch_users_answers([1], START, END, 1)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_malformed_wrapper_metadata_is_rejected():
+    respx.get("https://api.stackexchange.com/2.3/users/1/answers").mock(
+        return_value=httpx.Response(
+            200,
+            json={"items": [], "has_more": False, "quota_remaining": "not-a-number"},
+        )
+    )
+    async with httpx.AsyncClient(base_url="https://api.stackexchange.com/2.3") as http_client:
+        client = make_client(http_client, [])
+        with pytest.raises(UpstreamResponseError, match="invalid shape"):
+            await client.fetch_users_answers([1], START, END, 1)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_malformed_all_time_member_is_rejected():
+    respx.get("https://api.stackexchange.com/2.3/tags/python/top-answerers/all_time").mock(
+        return_value=httpx.Response(
+            200,
+            json={"items": [{"score": 10, "post_count": 2}], "has_more": False},
+        )
+    )
+    async with httpx.AsyncClient(base_url="https://api.stackexchange.com/2.3") as http_client:
+        client = make_client(http_client, [])
+        with pytest.raises(UpstreamResponseError, match="malformed tag score"):
+            await client.fetch_all_time_top_answerers("python")
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_duplicate_all_time_member_is_rejected():
+    item = {
+        "user": {"user_id": 1, "display_name": "Ada"},
+        "score": 10,
+        "post_count": 2,
+    }
+    respx.get("https://api.stackexchange.com/2.3/tags/python/top-answerers/all_time").mock(
+        return_value=httpx.Response(200, json={"items": [item, item], "has_more": False})
+    )
+    async with httpx.AsyncClient(base_url="https://api.stackexchange.com/2.3") as http_client:
+        client = make_client(http_client, [])
+        with pytest.raises(UpstreamResponseError, match="duplicate tag score user"):
+            await client.fetch_all_time_top_answerers("python")
 
 
 @pytest.mark.asyncio

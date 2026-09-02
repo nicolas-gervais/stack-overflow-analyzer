@@ -91,11 +91,21 @@ class SyncService:
                 page = await self._gateway.fetch_users_answers(
                     user_ids, cursor_from, period.end_exclusive, page_number
                 )
-                page_answers = [self._parse_answer(item) for item in page.items]
+                page_answers = list(
+                    {
+                        answer.answer_id: answer
+                        for answer in (self._parse_answer(item) for item in page.items)
+                    }.values()
+                )
                 question_payload, question_quota = await self._gateway.fetch_questions_by_ids(
                     [answer.question_id for answer in page_answers]
                 )
-                fetched_questions = [self._parse_question(item) for item in question_payload]
+                fetched_questions = list(
+                    {
+                        question.question_id: question
+                        for question in (self._parse_question(item) for item in question_payload)
+                    }.values()
+                )
                 questions = [question for question in fetched_questions if tag in question.tags]
                 qualifying_ids = {question.question_id for question in questions}
                 allowed_user_ids = set(user_ids)

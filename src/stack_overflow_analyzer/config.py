@@ -13,7 +13,6 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "Stack Overflow Analyzer"
-    environment: str = "development"
     log_level: str = "INFO"
     database_url: str = "sqlite+aiosqlite:///./stack_overflow.db"
     max_period_days: int = Field(default=31, ge=1, le=31)

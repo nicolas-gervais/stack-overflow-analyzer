@@ -76,6 +76,46 @@ async def test_benchmark_sync_batches_users_and_parent_questions(repository):
 
 
 @pytest.mark.asyncio
+async def test_benchmark_sync_deduplicates_upstream_objects(repository):
+    gateway = FakeStackExchange()
+    gateway.user_answer_pages = {
+        1: StackPage(items=[answer(), answer()], has_more=False, quota_remaining=100)
+    }
+    gateway.parent_questions = [question(), question()]
+    service = SyncService(gateway, repository)
+    period = DateRange(start_date=date(2025, 1, 1), end_date=date(2025, 2, 1))
+
+    result = await service.sync_benchmark("python", period, [1])
+    rows = await repository.benchmark_contributor_rows("python", period, [1])
+
+    assert result.answers_upserted == 1
+    assert result.questions_upserted == 1
+    assert rows[0].answer_count == 1
+
+
+@pytest.mark.asyncio
+async def test_repository_query_enforces_half_open_date_boundaries(repository):
+    gateway = FakeStackExchange()
+    gateway.user_answer_pages = {
+        1: StackPage(
+            items=[
+                {**answer(answer_id=20), "creation_date": 1735689600},
+                {**answer(answer_id=21), "creation_date": 1735775999},
+                {**answer(answer_id=22), "creation_date": 1735776000},
+            ],
+            has_more=False,
+        )
+    }
+    gateway.parent_questions = [question()]
+    period = DateRange(start_date=date(2025, 1, 1), end_date=date(2025, 1, 2))
+
+    await SyncService(gateway, repository).sync_benchmark("python", period, [1])
+    rows = await repository.benchmark_contributor_rows("python", period, [1])
+
+    assert rows[0].answer_count == 2
+
+
+@pytest.mark.asyncio
 async def test_benchmark_sync_stops_at_hard_page_budget():
     repository = FakeRepository()
     gateway = FakeStackExchange()

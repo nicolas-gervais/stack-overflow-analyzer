@@ -205,7 +205,7 @@ function renderLeaderboard(analysis) {
     const row = document.createElement("tr");
     if (item.user_id === analysis.contributor.user_id) row.className = "subject";
     const values = [
-      [item.period_benchmark_rank === null ? "â€”" : `#${item.period_benchmark_rank}`, "rank-number"],
+      [item.period_benchmark_rank === null ? "—" : `#${item.period_benchmark_rank}`, "rank-number"],
       [decodeEntities(item.display_name), "contributor-name"],
       [item.official_all_time_rank ? `#${item.official_all_time_rank}` : "—", ""],
       [formatNumber(item.answer_count), ""],
@@ -248,7 +248,14 @@ function renderNarrative(narrative) {
     ["Benchmark position", narrative.ranking_explanation],
     ["Compared with historical leaders", narrative.peer_comparison],
     ["Change from the previous month", narrative.period_change],
+    ["Topic fingerprint", narrative.topic_fingerprint],
   ];
+  if (narrative.root_cause_hypothesis) {
+    fields.push(["Root-cause hypothesis", narrative.root_cause_hypothesis]);
+  }
+  const confidence = document.querySelector("#narrative-confidence");
+  confidence.textContent = `${narrative.confidence} confidence`;
+  confidence.hidden = false;
   const host = document.querySelector("#narrative-content");
   host.replaceChildren(...fields.map(([heading, value]) => {
     const block = element("article", "narrative-block");
@@ -259,6 +266,7 @@ function renderNarrative(narrative) {
 
 function resetNarrative() {
   document.querySelector("#narrative-content").replaceChildren();
+  document.querySelector("#narrative-confidence").hidden = true;
   document.querySelector("#narrative-warning").hidden = true;
   document.querySelector("#narrative-loading").hidden = true;
 }

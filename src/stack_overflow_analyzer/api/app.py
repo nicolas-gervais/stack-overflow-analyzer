@@ -8,10 +8,11 @@ from typing import Annotated
 from uuid import uuid4
 
 import structlog
-from fastapi import FastAPI, HTTPException, Path, Query, Request, status
+from fastapi import FastAPI, HTTPException, Path, Query, Request, Response, status
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.middleware.base import RequestResponseEndpoint
 
 from stack_overflow_analyzer.adapters.database import SQLiteAnalyticsRepository
 from stack_overflow_analyzer.adapters.openai_narrative import OpenAINarrativeGenerator
@@ -42,6 +43,8 @@ from stack_overflow_analyzer.ports.stack_exchange import StackExchangeGateway
 
 logger = structlog.get_logger(__name__)
 TAG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9.+#-]{0,34}$")
+REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,100}$")
+MAX_USER_ID = (2**63) - 1
 UI_DIRECTORY = FileSystemPath(__file__).with_name("static")
 
 
@@ -105,8 +108,13 @@ def create_app(
     app.mount("/ui-assets", StaticFiles(directory=UI_DIRECTORY), name="ui-assets")
 
     @app.middleware("http")
-    async def request_context(request: Request, call_next: object) -> JSONResponse:
-        request_id = request.headers.get("x-request-id", str(uuid4()))[:100]
+    async def request_context(request: Request, call_next: RequestResponseEndpoint) -> Response:
+        supplied_request_id = request.headers.get("x-request-id", "")
+        request_id = (
+            supplied_request_id
+            if REQUEST_ID_PATTERN.fullmatch(supplied_request_id)
+            else str(uuid4())
+        )
         structlog.contextvars.clear_contextvars()
         structlog.contextvars.bind_contextvars(request_id=request_id)
         started = monotonic()
@@ -208,7 +216,7 @@ def create_app(
     )
     async def contributor_analysis(
         tag: Annotated[str, Path()],
-        user_id: Annotated[int, Path(gt=0)],
+        user_id: Annotated[int, Path(gt=0, le=MAX_USER_ID)],
         from_date: Annotated[date, Query()],
         to_date: Annotated[date, Query()],
     ) -> ContributorAnalysis:
@@ -226,7 +234,7 @@ def create_app(
     async def contributor_narrative(
         payload: NarrativeRequest,
         tag: Annotated[str, Path()],
-        user_id: Annotated[int, Path(gt=0)],
+        user_id: Annotated[int, Path(gt=0, le=MAX_USER_ID)],
     ) -> ContributorNarrative:
         return await narrative_service.create(
             validate_tag(tag),

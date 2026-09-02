@@ -12,3 +12,4 @@ __pycache__/
 *.db-wal
 .coverage
 htmlcov/
+SYSTEM_GUIDE.md

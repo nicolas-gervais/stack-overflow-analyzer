@@ -1,3 +1,4 @@
+import json
 from datetime import date
 from types import SimpleNamespace
 
@@ -19,14 +20,15 @@ from stack_overflow_analyzer.ports.repository import StoredContributorRow
 from tests.fakes import FakeNarrativeGenerator, FakeRepository, FakeStackExchange
 
 
-def output(evidence_ids):
+def output(evidence_ids, *, confidence=Confidence.MEDIUM, hypothesis=None):
     return NarrativeOutput(
         notable_contribution="Strong score.",
         ranking_explanation="Ranks first by score.",
         peer_comparison="Above mean.",
         period_change="Improved.",
         topic_fingerprint="Focused on pandas.",
-        confidence=Confidence.MEDIUM,
+        root_cause_hypothesis=hypothesis,
+        confidence=confidence,
         evidence_ids=evidence_ids,
     )
 
@@ -68,6 +70,57 @@ async def test_known_llm_evidence_ids_are_accepted():
         result.analysis.peer_comparison.peer_group
         == "active_official_all_time_top_20_excluding_subject"
     )
+
+
+@pytest.mark.asyncio
+async def test_sparse_evidence_caps_model_confidence():
+    service = NarrativeService(
+        analytics(),
+        FakeNarrativeGenerator(output(["period.total_score"], confidence=Confidence.HIGH)),
+    )
+
+    result = await service.create(
+        "python", DateRange(start_date=date(2025, 1, 1), end_date=date(2025, 1, 2)), 1
+    )
+
+    assert result.narrative.confidence is Confidence.MEDIUM
+
+
+@pytest.mark.asyncio
+async def test_unsupported_root_cause_hypothesis_is_rejected():
+    repository = FakeRepository()
+    service = NarrativeService(
+        AnalyticsService(repository, SyncService(FakeStackExchange(), repository)),
+        FakeNarrativeGenerator(
+            output(
+                ["period.answer_count"],
+                hypothesis="This may reflect a shift in priorities.",
+            )
+        ),
+    )
+
+    with pytest.raises(InvalidEvidenceError, match="without sufficient comparison evidence"):
+        await service.create(
+            "python", DateRange(start_date=date(2025, 1, 1), end_date=date(2025, 1, 2)), 1
+        )
+
+
+@pytest.mark.asyncio
+async def test_hypothesis_requires_contextual_evidence_id():
+    service = NarrativeService(
+        analytics(),
+        FakeNarrativeGenerator(
+            output(
+                ["period.answer_count"],
+                hypothesis="The higher score may reflect greater answer volume.",
+            )
+        ),
+    )
+
+    with pytest.raises(InvalidEvidenceError, match="without sufficient comparison evidence"):
+        await service.create(
+            "python", DateRange(start_date=date(2025, 1, 1), end_date=date(2025, 1, 2)), 1
+        )
 
 
 class FakeResponses:
@@ -115,6 +168,12 @@ async def test_openai_adapter_uses_responses_parse_and_pydantic_format():
     assert "never print evidence IDs" in client.responses.kwargs["instructions"]
     assert "Never begin with a categorical label" in client.responses.kwargs["instructions"]
     assert '"Very active"' in client.responses.kwargs["instructions"]
+    context = json.loads(client.responses.kwargs["input"])
+    assert "contributors" not in context
+    assert "display_name" not in context["contributor"]
+    assert "profile_url" not in context["contributor"]
+    assert "Ada" not in client.responses.kwargs["input"]
+    assert "root_cause_hypothesis" in NarrativeOutput.model_json_schema()["properties"]
 
 
 @pytest.mark.asyncio

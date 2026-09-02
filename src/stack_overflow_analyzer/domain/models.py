@@ -65,9 +65,9 @@ class Answer(BaseModel):
 class StackPage(BaseModel):
     items: list[dict[str, object]]
     has_more: bool = False
-    quota_remaining: int | None = None
-    quota_max: int | None = None
-    backoff: int | None = None
+    quota_remaining: int | None = Field(default=None, ge=0)
+    quota_max: int | None = Field(default=None, ge=0)
+    backoff: int | None = Field(default=None, ge=0)
 
 
 class SyncStatus(StrEnum):
@@ -187,23 +187,42 @@ class Confidence(StrEnum):
 
 class NarrativeOutput(BaseModel):
     notable_contribution: str = Field(
-        description="Natural prose synthesizing participation, significance, and overall change."
+        max_length=600,
+        description="Concise prose synthesizing participation, significance, and overall change.",
     )
     ranking_explanation: str = Field(
-        description="Natural prose interpreting the main measured driver of benchmark position."
+        max_length=600,
+        description="Concise prose interpreting the main measured driver of benchmark position.",
     )
     peer_comparison: str = Field(
-        description="Natural prose explaining the significance of comparison with benchmark peers."
+        max_length=600,
+        description="Concise prose explaining the significance of comparison with benchmark peers.",
     )
     period_change: str = Field(
-        description="Natural prose describing the trajectory from the previous equivalent period."
+        max_length=600,
+        description="Concise prose describing the trajectory from the previous equivalent period.",
     )
     topic_fingerprint: str = Field(
-        description="Co-occurring tags scoped strictly to selected-tag answers in this period."
+        max_length=600,
+        description="Co-occurring tags scoped strictly to selected-tag answers in this period.",
     )
-    confidence: Confidence
+    root_cause_hypothesis: str | None = Field(
+        default=None,
+        max_length=600,
+        description=(
+            "A cautiously worded hypothesis based only on supplied metric relationships, or null "
+            "when the supplied evidence does not support one."
+        ),
+    )
+    confidence: Confidence = Field(
+        description=(
+            "Confidence in the narrative's descriptive interpretation: low, medium, or high. "
+            "The application caps this using deterministic evidence-sufficiency rules."
+        )
+    )
     evidence_ids: list[str] = Field(
         min_length=1,
+        max_length=16,
         description=(
             "Machine-readable supporting evidence IDs; these identifiers must not appear in prose."
         ),
