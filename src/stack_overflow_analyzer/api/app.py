@@ -2,13 +2,15 @@ import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import date
+from pathlib import Path as FileSystemPath
 from time import monotonic
 from typing import Annotated
 from uuid import uuid4
 
 import structlog
 from fastapi import FastAPI, HTTPException, Path, Query, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from stack_overflow_analyzer.adapters.database import SQLiteAnalyticsRepository
@@ -20,8 +22,10 @@ from stack_overflow_analyzer.application.sync import SyncService
 from stack_overflow_analyzer.config import Settings, get_settings
 from stack_overflow_analyzer.domain.exceptions import (
     ContributorNotFoundError,
+    NarrativeRateLimitError,
     NarrativeUnavailableError,
     QuotaExhaustedError,
+    RequestBudgetExceededError,
     UpstreamError,
 )
 from stack_overflow_analyzer.domain.models import (
@@ -30,7 +34,6 @@ from stack_overflow_analyzer.domain.models import (
     ContributorNarrative,
     DateRange,
     Leaderboard,
-    SyncResult,
 )
 from stack_overflow_analyzer.logging import configure_logging
 from stack_overflow_analyzer.ports.narrative import NarrativeGenerator
@@ -39,12 +42,7 @@ from stack_overflow_analyzer.ports.stack_exchange import StackExchangeGateway
 
 logger = structlog.get_logger(__name__)
 TAG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9.+#-]{0,34}$")
-
-
-class SyncRequest(BaseModel):
-    tag: str
-    start_date: date
-    end_date: date
+UI_DIRECTORY = FileSystemPath(__file__).with_name("static")
 
 
 class NarrativeRequest(BaseModel):
@@ -79,7 +77,11 @@ def create_app(
         model=config.openai_model,
         timeout_seconds=config.openai_timeout_seconds,
     )
-    sync_service = SyncService(gateway, repo)
+    sync_service = SyncService(
+        gateway,
+        repo,
+        max_answer_pages_per_period=config.stack_exchange_max_answer_pages_per_period,
+    )
     analytics_service = AnalyticsService(repo, sync_service)
     narrative_service = NarrativeService(analytics_service, generator)
 
@@ -95,11 +97,12 @@ def create_app(
         title=config.app_name,
         version="0.1.0",
         description=(
-            "Deterministic period-cohort analytics for Stack Overflow contributors. "
-            "The LLM explains evidence; it never establishes metrics."
+            "Deterministic all-time Top-20 benchmark analytics for Stack Overflow contributors. "
+            "An LLM narrative summarizes the calculated result."
         ),
         lifespan=lifespan,
     )
+    app.mount("/ui-assets", StaticFiles(directory=UI_DIRECTORY), name="ui-assets")
 
     @app.middleware("http")
     async def request_context(request: Request, call_next: object) -> JSONResponse:
@@ -126,6 +129,13 @@ def create_app(
     async def contributor_not_found(_: Request, exc: ContributorNotFoundError) -> JSONResponse:
         return JSONResponse(status_code=status.HTTP_404_NOT_FOUND, content={"detail": str(exc)})
 
+    @app.exception_handler(RequestBudgetExceededError)
+    async def request_budget_exceeded(_: Request, exc: RequestBudgetExceededError) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content={"detail": str(exc)},
+        )
+
     @app.exception_handler(QuotaExhaustedError)
     async def quota_exhausted(_: Request, exc: QuotaExhaustedError) -> JSONResponse:
         return JSONResponse(
@@ -148,20 +158,31 @@ def create_app(
             content={"detail": str(exc)},
         )
 
+    @app.exception_handler(NarrativeRateLimitError)
+    async def narrative_rate_limited(_: Request, exc: NarrativeRateLimitError) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            content={"detail": str(exc)},
+        )
+
     @app.get("/health", response_model=HealthResponse, tags=["operations"])
     async def health() -> HealthResponse:
         return HealthResponse(status="ok")
 
-    @app.post(
-        "/v1/sync",
-        response_model=SyncResult,
-        status_code=status.HTTP_200_OK,
-        tags=["synchronization"],
-    )
-    async def sync_period(payload: SyncRequest) -> SyncResult:
-        tag = validate_tag(payload.tag)
-        period = validated_period(payload.start_date, payload.end_date, config.max_period_days)
-        return await sync_service.sync(tag, period)
+    @app.get("/", include_in_schema=False, response_class=FileResponse)
+    async def reviewer_ui() -> FileResponse:
+        return FileResponse(
+            UI_DIRECTORY / "index.html",
+            media_type="text/html",
+            headers={
+                "Content-Security-Policy": (
+                    "default-src 'self'; style-src 'self'; script-src 'self'; "
+                    "connect-src 'self'; img-src 'self' data:; object-src 'none'; "
+                    "base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+                ),
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
 
     @app.get(
         "/v1/tags/{tag}/contributors",
@@ -172,7 +193,7 @@ def create_app(
         tag: Annotated[str, Path()],
         from_date: Annotated[date, Query()],
         to_date: Annotated[date, Query()],
-        limit: Annotated[int, Query(ge=1, le=100)] = 20,
+        limit: Annotated[int, Query(ge=1, le=20)] = 20,
     ) -> Leaderboard:
         return await analytics_service.leaderboard(
             validate_tag(tag),
@@ -221,7 +242,7 @@ def create_app(
     async def all_time_top_answerers(
         tag: Annotated[str, Path()],
     ) -> AllTimeLeaderboard:
-        return await gateway.fetch_all_time_top_answerers(validate_tag(tag))
+        return await sync_service.get_all_time_cohort(validate_tag(tag))
 
     return app
 
@@ -243,13 +264,13 @@ def validated_period(start_date: date, end_date: date, max_days: int = 31) -> Da
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from exc
-    inclusive_days = (end_date - start_date).days + 1
-    if inclusive_days > max_days:
+    period_days = (end_date - start_date).days
+    if period_days > max_days:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
-                f"date range cannot exceed {max_days} inclusive days; "
-                "split longer analyses into monthly requests"
+                f"half-open date range cannot exceed {max_days} days; "
+                "choose an end date no more than one month after the start date"
             ),
         )
     return period

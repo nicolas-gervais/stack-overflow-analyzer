@@ -5,6 +5,7 @@ from stack_overflow_analyzer.domain.models import (
     AllTimeTopAnswerer,
     DateRange,
     NarrativeOutput,
+    Owner,
     StackPage,
 )
 from stack_overflow_analyzer.ports.narrative import NarrativeGenerator
@@ -18,39 +19,50 @@ from stack_overflow_analyzer.ports.stack_exchange import StackExchangeGateway
 
 class FakeStackExchange(StackExchangeGateway):
     def __init__(self) -> None:
-        self.question_pages: dict[int, StackPage | Exception] = {
+        self.user_answer_pages: dict[int, StackPage | Exception] = {
             1: StackPage(items=[], has_more=False, quota_remaining=9999)
         }
-        self.answers: list[dict[str, object]] = []
-        self.requested_pages: list[int] = []
-        self.requested_from_dates: list[object] = []
+        self.parent_questions: list[dict[str, object]] = []
+        self.requested_user_answer_pages: list[int] = []
+        self.requested_user_ids: list[list[int]] = []
+        self.requested_question_ids: list[list[int]] = []
+        self.all_time_contributors = [
+            AllTimeTopAnswerer(
+                rank=1,
+                user_id=1,
+                display_name="Ada",
+                score=100,
+                post_count=10,
+            )
+        ]
+        self.all_time_requests = 0
+        self.users: dict[int, Owner | None] = {}
+        self.requested_users: list[int] = []
         self.closed = False
 
-    async def fetch_questions(self, tag, from_date, to_date, page):
-        self.requested_pages.append(page)
-        self.requested_from_dates.append(from_date)
-        result = self.question_pages[page]
+    async def fetch_users_answers(self, user_ids, from_date, to_date, page):
+        self.requested_user_answer_pages.append(page)
+        self.requested_user_ids.append(user_ids)
+        result = self.user_answer_pages[page]
         if isinstance(result, Exception):
             raise result
         return result
 
-    async def fetch_answers(self, question_ids, from_date, to_date):
-        return self.answers, 9998
+    async def fetch_questions_by_ids(self, question_ids):
+        self.requested_question_ids.append(question_ids)
+        return self.parent_questions, 9998
 
     async def fetch_all_time_top_answerers(self, tag):
+        self.all_time_requests += 1
         return AllTimeLeaderboard(
             tag=tag,
-            contributors=[
-                AllTimeTopAnswerer(
-                    rank=1,
-                    user_id=1,
-                    display_name="Ada",
-                    score=100,
-                    post_count=10,
-                )
-            ],
+            contributors=self.all_time_contributors,
             quota_remaining=9999,
         )
+
+    async def fetch_user(self, user_id):
+        self.requested_users.append(user_id)
+        return self.users.get(user_id)
 
     async def close(self):
         self.closed = True
@@ -65,6 +77,8 @@ class FakeRepository(AnalyticsRepository):
         self.checkpoints: dict[tuple[str, object, object], Checkpoint] = {}
         self.checkpoint_count = 0
         self.related: list[tuple[str, int]] = []
+        self.cohort: AllTimeLeaderboard | None = None
+        self.users: dict[int, Owner] = {}
         self.closed = False
 
     async def initialize(self):
@@ -108,11 +122,23 @@ class FakeRepository(AnalyticsRepository):
     async def mark_sync_failed(self, sync_id, error_type):
         return None
 
-    async def contributor_rows(self, tag, period):
-        return self.rows_for_period(period)
+    async def benchmark_contributor_rows(self, tag, period, user_ids):
+        return [row for row in self.rows_for_period(period) if row.user_id in user_ids]
 
-    async def related_tags(self, tag, period, user_id):
+    async def answer_period_related_tags(self, tag, period, user_id):
         return self.related
+
+    async def get_all_time_cohort(self, tag):
+        return self.cohort
+
+    async def save_all_time_cohort(self, cohort):
+        self.cohort = cohort
+
+    async def get_user(self, user_id):
+        return self.users.get(user_id)
+
+    async def save_user(self, user):
+        self.users[user.user_id] = user
 
     async def close(self):
         self.closed = True

@@ -1,11 +1,8 @@
-.env
-.git
-.venv
-.uv-cache
-.pytest_cache
-.ruff_cache
-__pycache__
-*.db
-*.db-shm
-*.db-wal
-tests
+# Deny by default. The runtime image needs only the locked package inputs below.
+**
+
+!pyproject.toml
+!uv.lock
+!README.md
+!src/
+!src/**

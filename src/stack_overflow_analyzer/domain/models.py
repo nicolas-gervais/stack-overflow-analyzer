@@ -15,8 +15,8 @@ class DateRange(BaseModel):
     def end_not_before_start(cls, value: date, info: object) -> date:
         data = getattr(info, "data", {})
         start = data.get("start_date")
-        if start is not None and value < start:
-            raise ValueError("end_date must be on or after start_date")
+        if start is not None and value <= start:
+            raise ValueError("end_date must be after start_date")
         return value
 
     @property
@@ -25,14 +25,14 @@ class DateRange(BaseModel):
 
     @property
     def end_exclusive(self) -> datetime:
-        return datetime.combine(self.end_date + timedelta(days=1), datetime.min.time(), tzinfo=UTC)
+        return datetime.combine(self.end_date, datetime.min.time(), tzinfo=UTC)
 
     @property
     def previous(self) -> "DateRange":
-        days = (self.end_date - self.start_date).days + 1
+        days = (self.end_date - self.start_date).days
         return DateRange(
             start_date=self.start_date - timedelta(days=days),
-            end_date=self.start_date - timedelta(days=1),
+            end_date=self.start_date,
         )
 
 
@@ -92,8 +92,10 @@ class ContributorMetrics(BaseModel):
     user_id: int
     display_name: str
     profile_url: str | None = None
-    rank: int
-    is_top_20: bool
+    period_benchmark_rank: int | None
+    official_all_time_rank: int | None
+    is_official_all_time_top_20: bool
+    has_qualifying_answers: bool
     answer_count: int
     total_answer_score: int
     accepted_answer_count: int
@@ -102,13 +104,14 @@ class ContributorMetrics(BaseModel):
 
 
 class MetricComparison(BaseModel):
-    peer_median: float
+    peer_mean: float
     absolute_difference: float
     percent_difference: float | None
 
 
 class PeerComparison(BaseModel):
-    peer_group: str = "top_20_contributors_for_period"
+    peer_group: str = "active_official_all_time_top_20_excluding_subject"
+    peer_count: int
     answer_count: MetricComparison
     total_answer_score: MetricComparison
     acceptance_rate: MetricComparison
@@ -117,7 +120,8 @@ class PeerComparison(BaseModel):
 
 class PreviousPeriodComparison(BaseModel):
     period: DateRange
-    rank: int | None
+    period_benchmark_rank: int | None
+    period_benchmark_rank_change: int | None
     answer_count: int
     answer_count_change: int
     total_answer_score: int
@@ -140,26 +144,37 @@ class Evidence(BaseModel):
 
 
 class MetricDefinition(BaseModel):
-    name: str = "period_cohort_answer_score"
+    name: str = "all_time_top20_period_benchmark"
     description: str
     ranking_order: list[str]
+
+
+class CohortDefinition(BaseModel):
+    source: str = "Stack Exchange official all-time tag Top-20"
+    snapshot_at: datetime
+    official_cohort_size: int
+    subject_added_to_cohort: bool
+    comparison_cohort_size: int
 
 
 class ContributorAnalysis(BaseModel):
     tag: str
     period: DateRange
     metric: MetricDefinition
+    cohort: CohortDefinition
     contributor: ContributorMetrics
     peer_comparison: PeerComparison
     previous_period: PreviousPeriodComparison
     related_tags: list[RelatedTag]
     evidence: list[Evidence]
+    contributors: list[ContributorMetrics]
 
 
 class Leaderboard(BaseModel):
     tag: str
     period: DateRange
     metric: MetricDefinition
+    cohort: CohortDefinition
     contributors: list[ContributorMetrics]
     total_contributors: int
 
@@ -171,14 +186,28 @@ class Confidence(StrEnum):
 
 
 class NarrativeOutput(BaseModel):
-    notable_contribution: str
-    ranking_explanation: str
-    peer_comparison: str
-    period_change: str
-    topic_fingerprint: str
-    root_cause_hypothesis: str | None
+    notable_contribution: str = Field(
+        description="Natural prose synthesizing participation, significance, and overall change."
+    )
+    ranking_explanation: str = Field(
+        description="Natural prose interpreting the main measured driver of benchmark position."
+    )
+    peer_comparison: str = Field(
+        description="Natural prose explaining the significance of comparison with benchmark peers."
+    )
+    period_change: str = Field(
+        description="Natural prose describing the trajectory from the previous equivalent period."
+    )
+    topic_fingerprint: str = Field(
+        description="Co-occurring tags scoped strictly to selected-tag answers in this period."
+    )
     confidence: Confidence
-    evidence_ids: list[str] = Field(min_length=1)
+    evidence_ids: list[str] = Field(
+        min_length=1,
+        description=(
+            "Machine-readable supporting evidence IDs; these identifiers must not appear in prose."
+        ),
+    )
 
 
 class ContributorNarrative(BaseModel):
@@ -199,4 +228,5 @@ class AllTimeLeaderboard(BaseModel):
     tag: str
     source: str = "Stack Exchange /tags/{tag}/top-answerers/all_time"
     contributors: list[AllTimeTopAnswerer]
+    retrieved_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     quota_remaining: int | None = None

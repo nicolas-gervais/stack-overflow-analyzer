@@ -8,6 +8,7 @@ from urllib.parse import quote
 
 import httpx
 import structlog
+from pydantic import ValidationError
 
 from stack_overflow_analyzer.domain.exceptions import (
     QuotaExhaustedError,
@@ -16,6 +17,7 @@ from stack_overflow_analyzer.domain.exceptions import (
 from stack_overflow_analyzer.domain.models import (
     AllTimeLeaderboard,
     AllTimeTopAnswerer,
+    Owner,
     StackPage,
 )
 from stack_overflow_analyzer.ports.stack_exchange import StackExchangeGateway
@@ -44,13 +46,17 @@ class StackExchangeClient(StackExchangeGateway):
         self._quota_remaining: int | None = None
         self._backoff_until = 0.0
 
-    async def fetch_questions(
-        self, tag: str, from_date: datetime, to_date: datetime, page: int
+    async def fetch_users_answers(
+        self, user_ids: list[int], from_date: datetime, to_date: datetime, page: int
     ) -> StackPage:
+        unique_ids = list(dict.fromkeys(user_ids))
+        if not unique_ids:
+            raise ValueError("at least one user ID is required")
+        if len(unique_ids) > 100:
+            raise ValueError("Stack Exchange accepts at most 100 user IDs per batch")
         payload = await self._request(
-            "/questions",
+            f"/users/{';'.join(str(item) for item in unique_ids)}/answers",
             {
-                "tagged": tag,
                 "fromdate": int(from_date.timestamp()),
                 "todate": int(to_date.timestamp()) - 1,
                 "sort": "creation",
@@ -61,33 +67,20 @@ class StackExchangeClient(StackExchangeGateway):
         )
         return StackPage.model_validate(payload)
 
-    async def fetch_answers(
-        self, question_ids: list[int], from_date: datetime, to_date: datetime
+    async def fetch_questions_by_ids(
+        self, question_ids: list[int]
     ) -> tuple[list[dict[str, object]], int | None]:
-        if not question_ids:
+        unique_ids = list(dict.fromkeys(question_ids))
+        if not unique_ids:
             return [], self._quota_remaining
-        if len(question_ids) > 100:
+        if len(unique_ids) > 100:
             raise ValueError("Stack Exchange accepts at most 100 question IDs per batch")
-
-        answers: list[dict[str, object]] = []
-        page_number = 1
-        while True:
-            payload = await self._request(
-                f"/questions/{';'.join(str(item) for item in question_ids)}/answers",
-                {
-                    "fromdate": int(from_date.timestamp()),
-                    "todate": int(to_date.timestamp()) - 1,
-                    "sort": "creation",
-                    "order": "asc",
-                    "page": page_number,
-                    "pagesize": 100,
-                },
-            )
-            page = StackPage.model_validate(payload)
-            answers.extend(page.items)
-            if not page.has_more:
-                return answers, page.quota_remaining
-            page_number += 1
+        payload = await self._request(
+            f"/questions/{';'.join(str(item) for item in unique_ids)}",
+            {"pagesize": 100},
+        )
+        page = StackPage.model_validate(payload)
+        return page.items, page.quota_remaining
 
     async def fetch_all_time_top_answerers(self, tag: str) -> AllTimeLeaderboard:
         encoded_tag = quote(tag, safe="")
@@ -113,6 +106,16 @@ class StackExchangeClient(StackExchangeGateway):
         return AllTimeLeaderboard(
             tag=tag, contributors=contributors, quota_remaining=page.quota_remaining
         )
+
+    async def fetch_user(self, user_id: int) -> Owner | None:
+        payload = await self._request(f"/users/{user_id}", {})
+        page = StackPage.model_validate(payload)
+        if not page.items:
+            return None
+        try:
+            return Owner.model_validate(page.items[0])
+        except ValidationError as exc:
+            raise UpstreamResponseError("malformed user in Stack Exchange response") from exc
 
     async def _request(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
         if self._quota_remaining == 0:

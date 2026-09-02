@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="Analyze a Stack Overflow contributor against an official tag benchmark."
+    >
+    <title>Stack Overflow Contributor Analyzer</title>
+    <link rel="stylesheet" href="/ui-assets/styles.css">
+    <script src="/ui-assets/app.js" defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Contributor Analyzer home">
+        <span class="brand-mark" aria-hidden="true">SO</span>
+        <span>Contributor Analyzer</span>
+      </a>
+      <nav aria-label="Developer links">
+        <a href="/docs">API docs</a>
+        <a href="/health">Health</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <h1>Compare a Stack Overflow contributor.</h1>
+        <p>
+          Benchmark one contributor against the official all-time Top-20 answerers for a technology
+          tag during a single month.
+        </p>
+      </section>
+
+      <section class="panel query-panel" aria-labelledby="query-heading">
+        <div class="panel-heading">
+          <div>
+            <div class="step">01</div>
+            <h2 id="query-heading">Choose a contributor and month</h2>
+          </div>
+        </div>
+
+        <form id="analysis-form" novalidate>
+          <div class="field field-wide">
+            <label for="profile">Stack Overflow profile URL or user ID</label>
+            <input
+              id="profile"
+              name="profile"
+              type="text"
+              inputmode="url"
+              autocomplete="url"
+              value="https://stackoverflow.com/users/10908375/nicolas-gervais"
+              required
+            >
+            <div class="field-help">
+              My account:
+              <a
+                href="https://stackoverflow.com/users/10908375/nicolas-gervais"
+                target="_blank"
+                rel="noopener noreferrer"
+              >https://stackoverflow.com/users/10908375/nicolas-gervais</a>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="tag">Technology tag</label>
+            <input id="tag" name="tag" type="text" value="keras" maxlength="35" required>
+            <div class="field-help">Examples: keras, tensorflow, pytorch</div>
+          </div>
+
+          <div class="field">
+            <label for="month">Contribution month</label>
+            <input id="month" name="month" type="month" min="2008-01" required>
+          </div>
+
+          <label class="narrative-option" for="include-narrative">
+            <input id="include-narrative" name="include-narrative" type="checkbox" checked>
+            <span>
+              <strong>Include AI narrative</strong>
+              <small>Uses the configured OpenAI API key and may incur provider charges.</small>
+            </span>
+          </label>
+
+          <button id="submit-button" type="submit">
+            <span>Analyze contribution</span>
+            <span aria-hidden="true">&rarr;</span>
+          </button>
+        </form>
+      </section>
+
+      <section id="status-region" class="status-region" aria-live="polite" hidden></section>
+
+      <section id="results" class="results" aria-labelledby="results-heading" hidden>
+        <div class="result-heading">
+          <div>
+            <div class="eyebrow">Analysis complete</div>
+            <h2 id="results-heading"></h2>
+            <p id="result-context"></p>
+          </div>
+          <a id="profile-link" class="secondary-button" target="_blank" rel="noopener noreferrer">
+            View profile
+          </a>
+        </div>
+
+        <div id="metric-cards" class="metric-grid"></div>
+        <div id="activity-note" class="status-region info" hidden></div>
+
+        <section id="narrative-section" class="panel narrative-panel" aria-labelledby="narrative-heading">
+          <div class="panel-heading">
+            <div>
+              <div class="step">02</div>
+              <h2 id="narrative-heading">AI narrative</h2>
+            </div>
+          </div>
+          <div id="narrative-loading" class="loading-line" hidden>
+            <span class="spinner" aria-hidden="true"></span>
+            Generating summary&hellip;
+          </div>
+          <div id="narrative-warning" class="inline-warning" hidden></div>
+          <div id="narrative-content" class="narrative-grid"></div>
+        </section>
+
+        <div class="two-column">
+          <section class="panel" aria-labelledby="peer-heading">
+            <div class="panel-heading compact">
+              <div>
+                <div class="step">03</div>
+                <h2 id="peer-heading">Against active benchmark peers</h2>
+              </div>
+              <span id="peer-note" class="privacy-note"></span>
+            </div>
+            <div id="peer-comparison"></div>
+          </section>
+
+          <section class="panel" aria-labelledby="previous-heading">
+            <div class="panel-heading compact">
+              <div>
+                <div class="step">04</div>
+                <h2 id="previous-heading">Versus previous month</h2>
+              </div>
+            </div>
+            <div id="previous-period"></div>
+          </section>
+        </div>
+
+        <section class="panel" aria-labelledby="leaderboard-heading">
+          <div class="panel-heading compact">
+            <div>
+              <div class="step">05</div>
+              <h2 id="leaderboard-heading">Complete benchmark cohort</h2>
+            </div>
+            <span id="cohort-note" class="privacy-note"></span>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Period rank</th>
+                  <th scope="col">Contributor</th>
+                  <th scope="col">Official rank</th>
+                  <th scope="col">Answers</th>
+                  <th scope="col">Score</th>
+                  <th scope="col">Accepted</th>
+                  <th scope="col">Average</th>
+                </tr>
+              </thead>
+              <tbody id="leaderboard-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <details class="panel raw-panel">
+          <summary>Raw API response</summary>
+          <p>Useful for inspecting the exact machine-readable contract.</p>
+          <pre id="raw-json"></pre>
+        </details>
+      </section>
+    </main>
+
+  </body>
+</html>

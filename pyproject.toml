@@ -33,13 +33,14 @@ dev = [
 packages = ["src/stack_overflow_analyzer"]
 
 [tool.pytest.ini_options]
-addopts = "-q -p no:cacheprovider --basetemp=.test-tmp"
+addopts = "-q -p no:cacheprovider"
 asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+extend-exclude = [".test-tmp*", ".venv*", ".uv-cache*", ".pre-commit-cache"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "ASYNC", "S", "RUF"]

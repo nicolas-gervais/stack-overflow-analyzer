@@ -1,7 +1,13 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
 
-from stack_overflow_analyzer.domain.models import Answer, DateRange, Question
+from stack_overflow_analyzer.domain.models import (
+    AllTimeLeaderboard,
+    Answer,
+    DateRange,
+    Owner,
+    Question,
+)
 
 
 class StoredContributorRow:
@@ -74,12 +80,26 @@ class AnalyticsRepository(ABC):
     async def mark_sync_failed(self, sync_id: str, error_type: str) -> None: ...
 
     @abstractmethod
-    async def contributor_rows(self, tag: str, period: DateRange) -> list[StoredContributorRow]: ...
+    async def benchmark_contributor_rows(
+        self, tag: str, period: DateRange, user_ids: list[int]
+    ) -> list[StoredContributorRow]: ...
 
     @abstractmethod
-    async def related_tags(
+    async def answer_period_related_tags(
         self, tag: str, period: DateRange, user_id: int
     ) -> list[tuple[str, int]]: ...
+
+    @abstractmethod
+    async def get_all_time_cohort(self, tag: str) -> AllTimeLeaderboard | None: ...
+
+    @abstractmethod
+    async def save_all_time_cohort(self, cohort: AllTimeLeaderboard) -> None: ...
+
+    @abstractmethod
+    async def get_user(self, user_id: int) -> Owner | None: ...
+
+    @abstractmethod
+    async def save_user(self, user: Owner) -> None: ...
 
     @abstractmethod
     async def close(self) -> None: ...

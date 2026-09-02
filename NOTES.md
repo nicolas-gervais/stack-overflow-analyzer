@@ -1,41 +1,48 @@
 # Submission notes
 
+## Core decision
+
+The primary metric compares a specified contributor with Stack Exchange's official all-time Top-20
+answerers for the tag during a caller-selected half-open period of at most 31 days. If necessary,
+the subject is added as a twenty-first member. This produces an honest, bounded benchmark rank; it
+does not claim to discover the global Top-20 for an arbitrary historical interval.
+
+The population choice avoids the quota-prohibitive operation of crawling every question and answer
+to discover an arbitrary-period global leaderboard. Native Stack Overflow scores remain the
+ranking fact—there is no invented weighted contribution score.
+
+## Reliability
+
+At most six combined user-answer pages are processed per period. Parent questions are fetched in
+100-ID batches to verify the requested tag and build topic fingerprints. Current and previous
+periods therefore have a hard upper bound of 25 upstream calls including an uncached cohort lookup.
+Budget overflow fails explicitly rather than returning incomplete analytics.
+
+SQLite stores the official cohort snapshot, stable upstream entities, and transactional page
+checkpoints. Synchronization is idempotent and resumable. The HTTP adapter handles quota, provider
+backoff, pagination, batching, timeout, partial failure, and bounded transient retry.
+
+The optional OpenAI Responses API integration receives only deterministic analysis and a closed
+evidence set. Pydantic Structured Outputs define its schema, and application validation rejects
+unknown evidence IDs.
+
 ## Run locally
 
-Install Python 3.12+ and `uv`, copy `.env.example` to `.env`, optionally set
-`SOA_OPENAI_API_KEY` for LLM narratives, then run `uv sync --frozen` and
-`uv run uvicorn stack_overflow_analyzer.main:app --host 127.0.0.1 --port 8000`. The deterministic endpoints need no
-credentials, including no Stack Overflow key or login. `docker compose up --build` is the
-one-command alternative.
-
-## Architecture and decisions
-
-FastAPI calls small application services through abstract Stack Exchange, repository, and narrative
-boundaries. The async HTTP adapter handles Stack Exchange's pagination, batching, backoff, quota,
-and retry contract; the SQLAlchemy adapter gives SQLite idempotent upserts and transactional page
-checkpoints. Pure analytics owns ranking, medians, comparisons, date arithmetic, topic fingerprints,
-and evidence creation. The OpenAI adapter uses Responses API Structured Outputs through Pydantic,
-while an application-level allowlist prevents fabricated evidence references.
-
-API requests are capped at 31 inclusive days so one accidental multi-year query cannot consume the
-entire shared anonymous quota. Callers split longer reporting windows into monthly requests.
-
-The period-cohort metric is intentionally narrower than “all answers to this tag posted in the
-period.” Stack Exchange offers no efficient arbitrary-range endpoint for that broader query, so the
-service reports a complete bounded cohort rather than silently returning incomplete data or burning
-the daily quota on a site-wide answer crawl. The official all-time Top-20 remains available as a
-separate upstream feature.
+The reviewer path is `docker compose up --build`, followed by opening `http://127.0.0.1:8000`.
+Docker contains Python, `uv`, and the application; the browser UI accepts a profile URL and renders
+the analytics without curl or jq. Stack Overflow analytics require no credentials. Put
+`SOA_OPENAI_API_KEY` in a private `.env` only when testing the optional narrative. Native Python
+3.12+ and `uv` execution remains available for development.
 
 ## With another day
 
-I would add a small React timeline/leaderboard, background refresh with a cross-process lease,
-conditional narrative caching keyed by analysis hash/model/prompt version, migrations via Alembic,
-OpenTelemetry metrics, and an eval fixture set that scores narrative faithfulness and evidence
-coverage before prompt/model changes. For larger deployments I would move to Postgres and a worker,
-while keeping the existing ports.
+I would add an explicit cohort-refresh operation, conditional narrative caching keyed by analysis
+hash/model/prompt version, Alembic migrations, OpenTelemetry metrics, browser-level UI tests, and an
+eval fixture set for narrative faithfulness. For a larger deployment I would move to Postgres and a
+worker while preserving the existing ports.
 
 ## AI usage
 
-I used an AI coding assistant to help scaffold modules, enumerate failure cases, and review tests and
-documentation. I verified the API constraints, chose and documented the metric myself, kept all
-analytics deterministic, and ran formatting, linting, and the full offline suite before submission.
+I used an AI coding assistant to help scaffold modules, enumerate failure cases, and review tests
+and documentation. I verified API constraints, selected and documented the benchmark population,
+kept every metric deterministic, and ran formatting, linting, and the complete offline suite.

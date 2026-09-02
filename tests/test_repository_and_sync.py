@@ -1,11 +1,14 @@
-from datetime import UTC, date, datetime
+from datetime import date
 
 import pytest
 
 from stack_overflow_analyzer.adapters.database import SQLiteAnalyticsRepository
 from stack_overflow_analyzer.application.sync import SyncService
-from stack_overflow_analyzer.domain.exceptions import UpstreamResponseError
-from stack_overflow_analyzer.domain.models import DateRange, StackPage
+from stack_overflow_analyzer.domain.exceptions import (
+    RequestBudgetExceededError,
+    UpstreamResponseError,
+)
+from stack_overflow_analyzer.domain.models import DateRange, Owner, StackPage
 from tests.fakes import FakeRepository, FakeStackExchange
 
 
@@ -42,90 +45,124 @@ async def repository(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_sync_is_idempotent_and_persists_related_tags(repository):
+async def test_benchmark_sync_batches_users_and_parent_questions(repository):
     gateway = FakeStackExchange()
-    gateway.question_pages = {1: StackPage(items=[question()], has_more=False, quota_remaining=100)}
-    gateway.answers = [answer()]
+    gateway.user_answer_pages = {
+        1: StackPage(
+            items=[answer(), {**answer(answer_id=21), "question_id": 11}],
+            has_more=False,
+            quota_remaining=100,
+        )
+    }
+    gateway.parent_questions = [
+        question(creation_date=1609459200),
+        {**question(question_id=11, creation_date=1609459200), "tags": ["java"]},
+    ]
     service = SyncService(gateway, repository)
-    period = DateRange(start_date=date(2025, 1, 1), end_date=date(2025, 1, 1))
+    period = DateRange(start_date=date(2025, 1, 1), end_date=date(2025, 2, 1))
 
-    first = await service.sync("python", period)
-    second = await service.sync("python", period)
-    rows = await repository.contributor_rows("python", period)
-    topics = await repository.related_tags("python", period, 1)
+    first = await service.sync_benchmark("python", period, [1, 2])
+    second = await service.sync_benchmark("python", period, [1, 2])
+    rows = await repository.benchmark_contributor_rows("python", period, [1, 2])
 
     assert first.answers_upserted == 1
     assert second.resumed is True
-    assert gateway.requested_pages == [1]
+    assert gateway.requested_user_answer_pages == [1]
+    assert gateway.requested_user_ids == [[1, 2]]
+    assert gateway.requested_question_ids == [[10, 11]]
     assert len(rows) == 1
+    assert rows[0].answer_count == 1
     assert rows[0].total_answer_score == 4
-    assert topics == [("pandas", 1)]
 
 
 @pytest.mark.asyncio
-async def test_interrupted_sync_resumes_at_uncommitted_page(repository):
-    period = DateRange(start_date=date(2025, 1, 1), end_date=date(2025, 1, 1))
+async def test_benchmark_sync_stops_at_hard_page_budget():
+    repository = FakeRepository()
+    gateway = FakeStackExchange()
+    gateway.user_answer_pages = {
+        1: StackPage(items=[answer()], has_more=True, quota_remaining=100),
+    }
+    gateway.parent_questions = [question()]
+    service = SyncService(gateway, repository, max_answer_pages_per_period=1)
+    period = DateRange(start_date=date(2025, 1, 1), end_date=date(2025, 1, 2))
+
+    with pytest.raises(RequestBudgetExceededError, match="shorter date range"):
+        await service.sync_benchmark("python", period, [1])
+
+    assert gateway.requested_user_answer_pages == [1]
+
+
+@pytest.mark.asyncio
+async def test_interrupted_benchmark_sync_resumes_at_uncommitted_page(repository):
+    period = DateRange(start_date=date(2025, 1, 1), end_date=date(2025, 1, 2))
     first_gateway = FakeStackExchange()
-    first_gateway.question_pages = {
-        1: StackPage(items=[question()], has_more=True, quota_remaining=100),
+    first_gateway.user_answer_pages = {
+        1: StackPage(items=[answer()], has_more=True, quota_remaining=100),
         2: UpstreamResponseError("boom"),
     }
-    first_gateway.answers = [answer()]
+    first_gateway.parent_questions = [question()]
 
     with pytest.raises(UpstreamResponseError):
-        await SyncService(first_gateway, repository).sync("python", period)
+        await SyncService(first_gateway, repository).sync_benchmark("python", period, [1, 2])
 
     resumed_gateway = FakeStackExchange()
-    resumed_gateway.question_pages = {2: StackPage(items=[], has_more=False, quota_remaining=98)}
-    result = await SyncService(resumed_gateway, repository).sync("python", period)
-    rows = await repository.contributor_rows("python", period)
+    resumed_gateway.user_answer_pages = {2: StackPage(items=[], has_more=False, quota_remaining=98)}
+    result = await SyncService(resumed_gateway, repository).sync_benchmark("python", period, [1, 2])
 
-    assert first_gateway.requested_pages == [1, 2]
-    assert resumed_gateway.requested_pages == [2]
+    assert first_gateway.requested_user_answer_pages == [1, 2]
+    assert resumed_gateway.requested_user_answer_pages == [2]
     assert result.resumed is True
     assert result.pages_completed == 2
-    assert len(rows) == 1
 
 
 @pytest.mark.asyncio
-async def test_malformed_entity_does_not_advance_checkpoint(repository):
-    gateway = FakeStackExchange()
-    gateway.question_pages = {
-        1: StackPage(items=[{"question_id": 1}], has_more=False, quota_remaining=10)
+async def test_malformed_parent_question_does_not_advance_benchmark_checkpoint(repository):
+    period = DateRange(start_date=date(2025, 1, 1), end_date=date(2025, 1, 2))
+    malformed_gateway = FakeStackExchange()
+    malformed_gateway.user_answer_pages = {
+        1: StackPage(items=[answer()], has_more=False, quota_remaining=100)
     }
-    period = DateRange(start_date=date(2025, 1, 1), end_date=date(2025, 1, 1))
+    malformed_gateway.parent_questions = [{"question_id": 10}]
 
     with pytest.raises(UpstreamResponseError, match="malformed question"):
-        await SyncService(gateway, repository).sync("python", period)
-    checkpoint, resumed = await repository.get_or_create_checkpoint("python", period)
+        await SyncService(malformed_gateway, repository).sync_benchmark("python", period, [1])
 
-    assert resumed is True
-    assert checkpoint.next_page == 1
-    assert checkpoint.completed is False
+    fixed_gateway = FakeStackExchange()
+    fixed_gateway.user_answer_pages = {1: StackPage(items=[], has_more=False, quota_remaining=99)}
+    result = await SyncService(fixed_gateway, repository).sync_benchmark("python", period, [1])
+
+    assert fixed_gateway.requested_user_answer_pages == [1]
+    assert result.resumed is True
 
 
 @pytest.mark.asyncio
-async def test_anonymous_page_limit_rolls_forward_time_cursor():
-    period = DateRange(start_date=date(2020, 1, 1), end_date=date(2025, 1, 7))
-    repository = FakeRepository()
-    checkpoint, _ = await repository.get_or_create_checkpoint("tensorflow", period)
-    checkpoint.next_page = 25
-    rollover_timestamp = 1609459200
+async def test_all_time_cohort_is_persisted_and_reused(repository):
     gateway = FakeStackExchange()
-    gateway.question_pages = {
-        25: StackPage(
-            items=[question(creation_date=rollover_timestamp)],
-            has_more=True,
-            quota_remaining=100,
-        ),
-        1: StackPage(items=[], has_more=False, quota_remaining=99),
-    }
+    service = SyncService(gateway, repository)
 
-    result = await SyncService(gateway, repository).sync("tensorflow", period)
+    first = await service.get_all_time_cohort("python")
+    second = await service.get_all_time_cohort("python")
 
-    assert result.status.value == "completed"
-    assert gateway.requested_pages == [25, 1]
-    assert gateway.requested_from_dates == [
-        period.start_at,
-        datetime.fromtimestamp(rollover_timestamp, tz=UTC),
-    ]
+    assert first.contributors[0].display_name == "Ada"
+    assert second.retrieved_at == first.retrieved_at
+    assert gateway.all_time_requests == 1
+
+
+@pytest.mark.asyncio
+async def test_user_identity_is_persisted_and_reused(repository):
+    gateway = FakeStackExchange()
+    gateway.users[16923803] = Owner(
+        user_id=16923803,
+        display_name="Example User",
+        link="https://stackoverflow.com/users/16923803/example-user",
+        reputation=123,
+    )
+    service = SyncService(gateway, repository)
+
+    first = await service.get_user(16923803)
+    second = await service.get_user(16923803)
+
+    assert first is not None
+    assert second is not None
+    assert second.display_name == "Example User"
+    assert gateway.requested_users == [16923803]

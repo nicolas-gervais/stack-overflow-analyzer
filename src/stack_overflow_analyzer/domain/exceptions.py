@@ -18,7 +18,15 @@ class ContributorNotFoundError(AnalyzerError):
     pass
 
 
+class RequestBudgetExceededError(AnalyzerError):
+    pass
+
+
 class NarrativeUnavailableError(AnalyzerError):
+    pass
+
+
+class NarrativeRateLimitError(NarrativeUnavailableError):
     pass
 
 

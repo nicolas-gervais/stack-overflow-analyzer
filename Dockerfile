@@ -19,4 +19,4 @@ USER appuser
 
 ENV SOA_DATABASE_URL=sqlite+aiosqlite:////data/stack_overflow.db
 EXPOSE 8000
-CMD ["uv", "run", "uvicorn", "stack_overflow_analyzer.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/app/.venv/bin/uvicorn", "stack_overflow_analyzer.main:app", "--host", "0.0.0.0", "--port", "8000"]

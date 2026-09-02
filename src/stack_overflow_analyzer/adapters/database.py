@@ -19,7 +19,15 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from stack_overflow_analyzer.domain.models import Answer, DateRange, Question, SyncStatus
+from stack_overflow_analyzer.domain.models import (
+    AllTimeLeaderboard,
+    AllTimeTopAnswerer,
+    Answer,
+    DateRange,
+    Owner,
+    Question,
+    SyncStatus,
+)
 from stack_overflow_analyzer.ports.repository import (
     AnalyticsRepository,
     Checkpoint,
@@ -90,6 +98,29 @@ class SyncRunRecord(Base):
     quota_remaining: Mapped[int | None] = mapped_column(Integer)
     error_type: Mapped[str | None] = mapped_column(String(255))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CohortSnapshotRecord(Base):
+    __tablename__ = "cohort_snapshots"
+
+    tag: Mapped[str] = mapped_column(String(64), primary_key=True)
+    retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    quota_remaining: Mapped[int | None] = mapped_column(Integer)
+
+
+class CohortMemberRecord(Base):
+    __tablename__ = "cohort_members"
+    __table_args__ = (UniqueConstraint("tag", "official_rank"),)
+
+    tag: Mapped[str] = mapped_column(
+        ForeignKey("cohort_snapshots.tag", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    official_rank: Mapped[int] = mapped_column(Integer)
+    display_name: Mapped[str] = mapped_column(String(255))
+    profile_url: Mapped[str | None] = mapped_column(Text)
+    score: Mapped[int] = mapped_column(Integer)
+    post_count: Mapped[int] = mapped_column(Integer)
 
 
 class SQLiteAnalyticsRepository(AnalyticsRepository):
@@ -262,7 +293,11 @@ class SQLiteAnalyticsRepository(AnalyticsRepository):
                 run.error_type = error_type[:255]
                 run.updated_at = datetime.now(UTC)
 
-    async def contributor_rows(self, tag: str, period: DateRange) -> list[StoredContributorRow]:
+    async def benchmark_contributor_rows(
+        self, tag: str, period: DateRange, user_ids: list[int]
+    ) -> list[StoredContributorRow]:
+        if not user_ids:
+            return []
         accepted_count = func.sum(case((AnswerRecord.is_accepted.is_(True), 1), else_=0))
         statement = (
             select(
@@ -281,8 +316,7 @@ class SQLiteAnalyticsRepository(AnalyticsRepository):
             )
             .where(
                 QuestionTagRecord.tag == tag,
-                QuestionRecord.creation_date >= period.start_at,
-                QuestionRecord.creation_date < period.end_exclusive,
+                AnswerRecord.owner_user_id.in_(user_ids),
                 AnswerRecord.creation_date >= period.start_at,
                 AnswerRecord.creation_date < period.end_exclusive,
             )
@@ -302,11 +336,11 @@ class SQLiteAnalyticsRepository(AnalyticsRepository):
             for row in rows
         ]
 
-    async def related_tags(
+    async def answer_period_related_tags(
         self, tag: str, period: DateRange, user_id: int
     ) -> list[tuple[str, int]]:
-        target_tag = QuestionTagRecord.__table__.alias("target_tag")
-        related_tag = QuestionTagRecord.__table__.alias("related_tag")
+        target_tag = QuestionTagRecord.__table__.alias("answer_period_target_tag")
+        related_tag = QuestionTagRecord.__table__.alias("answer_period_related_tag")
         statement = (
             select(related_tag.c.tag, func.count(AnswerRecord.answer_id).label("answer_count"))
             .select_from(AnswerRecord)
@@ -317,8 +351,6 @@ class SQLiteAnalyticsRepository(AnalyticsRepository):
                 target_tag.c.tag == tag,
                 related_tag.c.tag != tag,
                 AnswerRecord.owner_user_id == user_id,
-                QuestionRecord.creation_date >= period.start_at,
-                QuestionRecord.creation_date < period.end_exclusive,
                 AnswerRecord.creation_date >= period.start_at,
                 AnswerRecord.creation_date < period.end_exclusive,
             )
@@ -329,6 +361,104 @@ class SQLiteAnalyticsRepository(AnalyticsRepository):
         async with self._sessions() as session:
             rows = (await session.execute(statement)).all()
         return [(str(row[0]), int(row[1])) for row in rows]
+
+    async def get_all_time_cohort(self, tag: str) -> AllTimeLeaderboard | None:
+        async with self._sessions() as session:
+            snapshot = await session.get(CohortSnapshotRecord, tag)
+            if snapshot is None:
+                return None
+            rows = (
+                await session.execute(
+                    select(CohortMemberRecord)
+                    .where(CohortMemberRecord.tag == tag)
+                    .order_by(CohortMemberRecord.official_rank)
+                )
+            ).scalars()
+            contributors = [
+                AllTimeTopAnswerer(
+                    rank=row.official_rank,
+                    user_id=row.user_id,
+                    display_name=row.display_name,
+                    profile_url=row.profile_url,
+                    score=row.score,
+                    post_count=row.post_count,
+                )
+                for row in rows
+            ]
+        retrieved_at = snapshot.retrieved_at
+        if retrieved_at.tzinfo is None:
+            retrieved_at = retrieved_at.replace(tzinfo=UTC)
+        return AllTimeLeaderboard(
+            tag=tag,
+            contributors=contributors,
+            quota_remaining=snapshot.quota_remaining,
+            retrieved_at=retrieved_at,
+        )
+
+    async def save_all_time_cohort(self, cohort: AllTimeLeaderboard) -> None:
+        async with self._sessions.begin() as session:
+            await session.execute(
+                delete(CohortMemberRecord).where(CohortMemberRecord.tag == cohort.tag)
+            )
+            statement = sqlite_insert(CohortSnapshotRecord).values(
+                tag=cohort.tag,
+                retrieved_at=cohort.retrieved_at,
+                quota_remaining=cohort.quota_remaining,
+            )
+            await session.execute(
+                statement.on_conflict_do_update(
+                    index_elements=[CohortSnapshotRecord.tag],
+                    set_={
+                        "retrieved_at": statement.excluded.retrieved_at,
+                        "quota_remaining": statement.excluded.quota_remaining,
+                    },
+                )
+            )
+            session.add_all(
+                [
+                    CohortMemberRecord(
+                        tag=cohort.tag,
+                        user_id=item.user_id,
+                        official_rank=item.rank,
+                        display_name=item.display_name,
+                        profile_url=item.profile_url,
+                        score=item.score,
+                        post_count=item.post_count,
+                    )
+                    for item in cohort.contributors
+                ]
+            )
+
+    async def get_user(self, user_id: int) -> Owner | None:
+        async with self._sessions() as session:
+            record = await session.get(UserRecord, user_id)
+        if record is None:
+            return None
+        return Owner(
+            user_id=record.user_id,
+            display_name=record.display_name,
+            link=record.profile_url,
+            reputation=record.reputation,
+        )
+
+    async def save_user(self, user: Owner) -> None:
+        async with self._sessions.begin() as session:
+            statement = sqlite_insert(UserRecord).values(
+                user_id=user.user_id,
+                display_name=user.display_name,
+                profile_url=user.link,
+                reputation=user.reputation,
+            )
+            await session.execute(
+                statement.on_conflict_do_update(
+                    index_elements=[UserRecord.user_id],
+                    set_={
+                        "display_name": statement.excluded.display_name,
+                        "profile_url": statement.excluded.profile_url,
+                        "reputation": statement.excluded.reputation,
+                    },
+                )
+            )
 
     async def close(self) -> None:
         await self._engine.dispose()
