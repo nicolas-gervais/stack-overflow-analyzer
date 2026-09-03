@@ -55,15 +55,14 @@ created during the requested period and ranks those individual totals. Accepted-
 answer count break ties. This measures the user's relative answer-score impact among a historically
 strong comparison group; it is not a global period leaderboard. 
 
-The optional OpenAI endpoint receives only deterministic subject metrics, comparisons, topics, and
-a closed evidence list. Pydantic Structured Outputs enforce the response shape.
+The optional OpenAI endpoint receives only deterministic subject metrics, comparisons, and a
+closed evidence list. Pydantic Structured Outputs enforce the response shape.
 
 ## With another day
 
 I would add richer ways to explore the results, especially interactive plots showing how scores,
 answer volume, and accepted answers change over time. I would also let users compare multiple
-periods or contributors, explore which topics drove the largest changes, and export or share a
-short report of the most important insights.
+periods or contributors and export or share a short report of the most important insights.
 
 ## AI usage
 

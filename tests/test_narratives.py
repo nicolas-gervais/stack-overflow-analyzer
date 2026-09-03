@@ -26,7 +26,6 @@ def output(evidence_ids, *, confidence=Confidence.MEDIUM, hypothesis=None):
         ranking_explanation="Ranks first by score.",
         peer_comparison="Above mean.",
         period_change="Improved.",
-        topic_fingerprint="Focused on pandas.",
         root_cause_hypothesis=hypothesis,
         confidence=confidence,
         evidence_ids=evidence_ids,
@@ -70,6 +69,28 @@ async def test_known_llm_evidence_ids_are_accepted():
         result.analysis.peer_comparison.peer_group
         == "active_official_all_time_top_20_excluding_subject"
     )
+    assert result.narrative.root_cause_hypothesis is None
+
+
+@pytest.mark.asyncio
+async def test_supported_root_cause_hypothesis_is_accepted():
+    service = NarrativeService(
+        analytics(),
+        FakeNarrativeGenerator(
+            output(
+                ["period.total_score", "previous.total_score_change"],
+                hypothesis=(
+                    "The result appears to be driven by the measured change in answer score."
+                ),
+            )
+        ),
+    )
+
+    result = await service.create(
+        "python", DateRange(start_date=date(2025, 1, 1), end_date=date(2025, 1, 2)), 1
+    )
+
+    assert result.narrative.root_cause_hypothesis is not None
 
 
 @pytest.mark.asyncio
@@ -113,6 +134,24 @@ async def test_hypothesis_requires_contextual_evidence_id():
             output(
                 ["period.answer_count"],
                 hypothesis="The higher score may reflect greater answer volume.",
+            )
+        ),
+    )
+
+    with pytest.raises(InvalidEvidenceError, match="without sufficient comparison evidence"):
+        await service.create(
+            "python", DateRange(start_date=date(2025, 1, 1), end_date=date(2025, 1, 2)), 1
+        )
+
+
+@pytest.mark.asyncio
+async def test_hypothesis_requires_evidence_for_an_available_comparison():
+    service = NarrativeService(
+        analytics(),
+        FakeNarrativeGenerator(
+            output(
+                ["peers.mean_total_score"],
+                hypothesis="The result may reflect a difference from active peers.",
             )
         ),
     )
@@ -173,7 +212,10 @@ async def test_openai_adapter_uses_responses_parse_and_pydantic_format():
     assert "display_name" not in context["contributor"]
     assert "profile_url" not in context["contributor"]
     assert "Ada" not in client.responses.kwargs["input"]
-    assert "root_cause_hypothesis" in NarrativeOutput.model_json_schema()["properties"]
+    assert "related_tags" not in context
+    schema_properties = NarrativeOutput.model_json_schema()["properties"]
+    assert "topic_fingerprint" not in schema_properties
+    assert "root_cause_hypothesis" in schema_properties
 
 
 @pytest.mark.asyncio

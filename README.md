@@ -57,8 +57,8 @@ those individual totals from highest to lowest; acceptance count and answer coun
 
 The resulting `period_benchmark_rank` indicates the user's answer-score position among that
 historically strong comparison group. It is not a global rank among everyone who used the tag.
-Answer counts, acceptance rate, average score, peer averages, previous-period change, and related
-tags explain the result rather than forming an opaque weighted score.
+Answer counts, acceptance rate, average score, peer averages, and previous-period change explain
+the result rather than forming an opaque weighted score.
 
 ## Development checks
 

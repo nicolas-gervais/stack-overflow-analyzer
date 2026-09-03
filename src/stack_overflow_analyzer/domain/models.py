@@ -130,12 +130,6 @@ class PreviousPeriodComparison(BaseModel):
     acceptance_rate_change: float
 
 
-class RelatedTag(BaseModel):
-    tag: str
-    answered_question_count: int
-    share_of_answers: float = Field(ge=0, le=1)
-
-
 class Evidence(BaseModel):
     id: str
     label: str
@@ -165,7 +159,6 @@ class ContributorAnalysis(BaseModel):
     contributor: ContributorMetrics
     peer_comparison: PeerComparison
     previous_period: PreviousPeriodComparison
-    related_tags: list[RelatedTag]
     evidence: list[Evidence]
     contributors: list[ContributorMetrics]
 
@@ -201,10 +194,6 @@ class NarrativeOutput(BaseModel):
     period_change: str = Field(
         max_length=600,
         description="Concise prose describing the trajectory from the previous equivalent period.",
-    )
-    topic_fingerprint: str = Field(
-        max_length=600,
-        description="Co-occurring tags scoped strictly to selected-tag answers in this period.",
     )
     root_cause_hypothesis: str | None = Field(
         default=None,

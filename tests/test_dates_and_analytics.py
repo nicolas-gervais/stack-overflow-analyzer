@@ -111,7 +111,7 @@ def test_peer_comparison_uses_mean_of_active_official_peers_excluding_subject():
 
 
 @pytest.mark.asyncio
-async def test_analysis_compares_official_peers_previous_period_and_topics():
+async def test_analysis_compares_official_peers_and_previous_period_without_topic_evidence():
     period = DateRange(start_date=date(2025, 2, 1), end_date=date(2025, 2, 3))
 
     def rows_for_period(candidate):
@@ -120,7 +120,6 @@ async def test_analysis_compares_official_peers_previous_period_and_topics():
         return [row(1, 5, 0, 1, "Ada")]
 
     repository = FakeRepository(rows_for_period)
-    repository.related = [("keras", 2), ("python", 1)]
     gateway = FakeStackExchange()
     gateway.all_time_contributors = cohort(1, 2).contributors
     service = AnalyticsService(repository, SyncService(gateway, repository))
@@ -133,9 +132,9 @@ async def test_analysis_compares_official_peers_previous_period_and_topics():
     assert analysis.peer_comparison.total_answer_score.peer_mean == 10
     assert analysis.previous_period.total_answer_score_change == 15
     assert analysis.previous_period.period_benchmark_rank_change == 0
-    assert analysis.related_tags[0].share_of_answers == 1
     assert len(analysis.contributors) == 2
-    assert "topics.keras" in {evidence.id for evidence in analysis.evidence}
+    assert "related_tags" not in analysis.model_dump()
+    assert all(not evidence.id.startswith("topics.") for evidence in analysis.evidence)
 
 
 @pytest.mark.asyncio
@@ -156,7 +155,6 @@ async def test_subject_outside_official_top20_is_added_to_comparison_cohort():
 @pytest.mark.asyncio
 async def test_analysis_returns_zero_metrics_for_valid_user_without_period_answers():
     repository = FakeRepository(lambda _: [row(1, 2, 0, 1)])
-    repository.related = [("irrelevant", 1)]
     gateway = FakeStackExchange()
     gateway.users[99] = Owner(
         user_id=99,
@@ -177,7 +175,6 @@ async def test_analysis_returns_zero_metrics_for_valid_user_without_period_answe
     assert analysis.contributor.acceptance_rate == 0
     assert analysis.previous_period.period_benchmark_rank is None
     assert analysis.previous_period.period_benchmark_rank_change is None
-    assert analysis.related_tags == []
     assert gateway.requested_users == [99]
     assert repository.users[99].display_name == "No Answers"
 

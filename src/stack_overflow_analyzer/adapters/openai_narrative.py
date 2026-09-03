@@ -39,10 +39,12 @@ Writing requirements:
 - peer_comparison should interpret what the comparison means, including a material caveat when one
   exists, rather than listing every peer mean.
 - period_change should describe the trajectory and its significance rather than listing every delta.
-- root_cause_hypothesis must be null unless a measured relationship in the supplied current,
-  peer, previous-period, or topic evidence supports a cautious hypothesis. When present, frame it
-  explicitly as a possibility (for example, "may reflect"), never as a known cause. Do not invent
-  events, motivations, projects, technologies, or activity outside the supplied data.
+- root_cause_hypothesis must be null unless comparative evidence supports a useful hypothesis about
+  a measured relationship among current-period metrics, active benchmark-peer comparisons, or
+  previous-period changes. When present, frame it explicitly as a possibility using cautious
+  language such as "appears to be driven by" or "may reflect," never as a known cause.
+- Never invent motivations, employment changes, projects, external events, or activity outside the
+  selected tag and period.
 
 Evidence requirements:
 - The supplied JSON is the entire source of truth. Do not calculate new metrics, invent thresholds,
@@ -55,8 +57,6 @@ Evidence requirements:
 - The rank is a benchmark-cohort rank, never a global period rank. The cohort consists of
   historically strong answerers, while its comparison values describe only the selected month.
 - Scope every conclusion to the requested tag and period, not the contributor's overall activity.
-- Scope topic_fingerprint to co-occurring tags on selected-tag answers; do not treat it as the
-  contributor's overall interests.
 - Calibrate the structured confidence field to evidence breadth and strength.
 - Confidence describes support for the narrative interpretation, not the correctness of the
   deterministic arithmetic. Use low for absent or very sparse comparison context, medium for a
@@ -146,7 +146,6 @@ class OpenAINarrativeGenerator(NarrativeGenerator):
             "contributor": contributor,
             "peer_comparison": analysis.peer_comparison.model_dump(mode="json"),
             "previous_period": analysis.previous_period.model_dump(mode="json"),
-            "related_tags": [item.model_dump(mode="json") for item in analysis.related_tags],
             "evidence": [item.model_dump(mode="json") for item in analysis.evidence],
         }
 

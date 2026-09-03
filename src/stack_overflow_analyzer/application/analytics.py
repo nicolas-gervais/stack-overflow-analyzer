@@ -14,7 +14,6 @@ from stack_overflow_analyzer.domain.models import (
     MetricDefinition,
     PeerComparison,
     PreviousPeriodComparison,
-    RelatedTag,
 )
 from stack_overflow_analyzer.ports.repository import AnalyticsRepository, StoredContributorRow
 
@@ -109,22 +108,7 @@ class AnalyticsService:
         previous_comparison = self._previous_comparison(
             contributor, previous_contributor, period.previous
         )
-        related_rows = (
-            await self._repository.answer_period_related_tags(tag, period, user_id)
-            if contributor.has_qualifying_answers
-            else []
-        )
-        related_tags = [
-            RelatedTag(
-                tag=related_tag,
-                answered_question_count=count,
-                share_of_answers=round(count / contributor.answer_count, 4),
-            )
-            for related_tag, count in related_rows
-        ]
-        evidence = self._evidence(
-            cohort, contributor, peer_comparison, previous_comparison, related_tags
-        )
+        evidence = self._evidence(cohort, contributor, peer_comparison, previous_comparison)
         return ContributorAnalysis(
             tag=tag,
             period=period,
@@ -133,7 +117,6 @@ class AnalyticsService:
             contributor=contributor,
             peer_comparison=peer_comparison,
             previous_period=previous_comparison,
-            related_tags=related_tags,
             evidence=evidence,
             contributors=current,
         )
@@ -276,9 +259,8 @@ class AnalyticsService:
         contributor: ContributorMetrics,
         peers: PeerComparison,
         previous: PreviousPeriodComparison,
-        related_tags: list[RelatedTag],
     ) -> list[Evidence]:
-        evidence = [
+        return [
             Evidence(
                 id="cohort.snapshot_at",
                 label="Benchmark cohort snapshot",
@@ -349,19 +331,6 @@ class AnalyticsService:
                 context="Current less previous equal-length half-open period.",
             ),
         ]
-        evidence.extend(
-            Evidence(
-                id=f"topics.{item.tag}",
-                label=f"Co-occurring tag: {item.tag}",
-                value=item.answered_question_count,
-                context=(
-                    f"Appears on {item.share_of_answers:.1%} of the contributor's "
-                    "qualifying answered questions."
-                ),
-            )
-            for item in related_tags
-        )
-        return evidence
 
 
 class _Identity:

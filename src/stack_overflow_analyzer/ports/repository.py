@@ -85,11 +85,6 @@ class AnalyticsRepository(ABC):
     ) -> list[StoredContributorRow]: ...
 
     @abstractmethod
-    async def answer_period_related_tags(
-        self, tag: str, period: DateRange, user_id: int
-    ) -> list[tuple[str, int]]: ...
-
-    @abstractmethod
     async def get_all_time_cohort(self, tag: str) -> AllTimeLeaderboard | None: ...
 
     @abstractmethod

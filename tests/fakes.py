@@ -76,7 +76,6 @@ class FakeRepository(AnalyticsRepository):
         self.rows_for_period = rows_for_period or (lambda _: [])
         self.checkpoints: dict[tuple[str, object, object], Checkpoint] = {}
         self.checkpoint_count = 0
-        self.related: list[tuple[str, int]] = []
         self.cohort: AllTimeLeaderboard | None = None
         self.users: dict[int, Owner] = {}
         self.closed = False
@@ -124,9 +123,6 @@ class FakeRepository(AnalyticsRepository):
 
     async def benchmark_contributor_rows(self, tag, period, user_ids):
         return [row for row in self.rows_for_period(period) if row.user_id in user_ids]
-
-    async def answer_period_related_tags(self, tag, period, user_id):
-        return self.related
 
     async def get_all_time_cohort(self, tag):
         return self.cohort

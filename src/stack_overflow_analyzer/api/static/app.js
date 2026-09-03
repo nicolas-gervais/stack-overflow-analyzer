@@ -248,10 +248,9 @@ function renderNarrative(narrative) {
     ["Benchmark position", narrative.ranking_explanation],
     ["Compared with historical leaders", narrative.peer_comparison],
     ["Change from the previous month", narrative.period_change],
-    ["Topic fingerprint", narrative.topic_fingerprint],
   ];
   if (narrative.root_cause_hypothesis) {
-    fields.push(["Root-cause hypothesis", narrative.root_cause_hypothesis]);
+    fields.push(["What may explain the result", narrative.root_cause_hypothesis]);
   }
   const confidence = document.querySelector("#narrative-confidence");
   confidence.textContent = `${narrative.confidence} confidence`;

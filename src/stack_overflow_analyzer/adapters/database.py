@@ -336,32 +336,6 @@ class SQLiteAnalyticsRepository(AnalyticsRepository):
             for row in rows
         ]
 
-    async def answer_period_related_tags(
-        self, tag: str, period: DateRange, user_id: int
-    ) -> list[tuple[str, int]]:
-        target_tag = QuestionTagRecord.__table__.alias("answer_period_target_tag")
-        related_tag = QuestionTagRecord.__table__.alias("answer_period_related_tag")
-        statement = (
-            select(related_tag.c.tag, func.count(AnswerRecord.answer_id).label("answer_count"))
-            .select_from(AnswerRecord)
-            .join(QuestionRecord, QuestionRecord.question_id == AnswerRecord.question_id)
-            .join(target_tag, target_tag.c.question_id == QuestionRecord.question_id)
-            .join(related_tag, related_tag.c.question_id == QuestionRecord.question_id)
-            .where(
-                target_tag.c.tag == tag,
-                related_tag.c.tag != tag,
-                AnswerRecord.owner_user_id == user_id,
-                AnswerRecord.creation_date >= period.start_at,
-                AnswerRecord.creation_date < period.end_exclusive,
-            )
-            .group_by(related_tag.c.tag)
-            .order_by(func.count(AnswerRecord.answer_id).desc(), related_tag.c.tag.asc())
-            .limit(5)
-        )
-        async with self._sessions() as session:
-            rows = (await session.execute(statement)).all()
-        return [(str(row[0]), int(row[1])) for row in rows]
-
     async def get_all_time_cohort(self, tag: str) -> AllTimeLeaderboard | None:
         async with self._sessions() as session:
             snapshot = await session.get(CohortSnapshotRecord, tag)

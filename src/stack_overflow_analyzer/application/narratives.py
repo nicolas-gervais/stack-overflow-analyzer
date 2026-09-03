@@ -34,16 +34,14 @@ class NarrativeService:
 
     @staticmethod
     def _supports_hypothesis(analysis: ContributorAnalysis, evidence_ids: list[str]) -> bool:
-        has_contextual_evidence = any(
-            evidence_id.startswith(("peers.", "previous.", "topics."))
-            for evidence_id in evidence_ids
+        has_active_peer_evidence = analysis.peer_comparison.peer_count > 0 and any(
+            evidence_id.startswith("peers.") for evidence_id in evidence_ids
         )
-        return bool(
-            analysis.contributor.has_qualifying_answers
-            and has_contextual_evidence
-            and (
-                analysis.peer_comparison.peer_count > 0 or analysis.previous_period.answer_count > 0
-            )
+        has_previous_period_evidence = analysis.previous_period.answer_count > 0 and any(
+            evidence_id.startswith("previous.") for evidence_id in evidence_ids
+        )
+        return analysis.contributor.has_qualifying_answers and (
+            has_active_peer_evidence or has_previous_period_evidence
         )
 
     @staticmethod

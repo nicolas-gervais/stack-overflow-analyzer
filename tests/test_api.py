@@ -14,7 +14,6 @@ def app_client(repository=None, stack_exchange=None, narrative_generator=None):
         ranking_explanation="None",
         peer_comparison="None",
         period_change="None",
-        topic_fingerprint="None",
         confidence=Confidence.LOW,
         evidence_ids=["period.benchmark_rank"],
     )
@@ -66,7 +65,11 @@ def test_root_serves_self_contained_reviewer_ui():
     assert "fetch(url, options)" in script.text
     assert "narrative.confidence" in script.text
     assert "narrative.root_cause_hypothesis" in script.text
-    assert "narrative.topic_fingerprint" in script.text
+    assert "narrative.topic_fingerprint" not in script.text
+    assert "Topic fingerprint" not in script.text
+    assert "What may explain the result" in script.text
+    assert "Root-cause hypothesis" not in script.text
+    assert "if (narrative.root_cause_hypothesis)" in script.text
     assert 'monthInput.value = "2020-08"' in script.text
     assert "benchmarkRank(value)" in script.text
     assert "No qualifying ${analysis.tag} answers were found" in script.text
@@ -198,7 +201,8 @@ def test_valid_contributor_without_period_answers_returns_zero_result():
         "average_answer_score": 0.0,
     }
     assert payload["previous_period"]["period_benchmark_rank_change"] is None
-    assert payload["related_tags"] == []
+    assert "related_tags" not in payload
+    assert all(not item["id"].startswith("topics.") for item in payload["evidence"])
     assert gateway.requested_users == [99]
 
 
@@ -235,7 +239,6 @@ def test_narrative_provider_failure_returns_controlled_502():
         ranking_explanation="None",
         peer_comparison="None",
         period_change="None",
-        topic_fingerprint="None",
         confidence=Confidence.LOW,
         evidence_ids=["period.benchmark_rank"],
     )
